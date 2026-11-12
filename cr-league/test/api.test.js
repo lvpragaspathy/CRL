@@ -22,7 +22,7 @@ before(async () => {
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(logs[tag]));
   });
   const crBase = await listen(cr);
-  cfg = { crToken: 'good-token', crBase: crBase + '/v1', pollMinutes: 10, friendlyTypes: ['friendly', 'clanMate'], inferTiebreak: true, linkWindowMinutes: 15, password: PW };
+  cfg = { timezone: 'America/Chicago', crToken: 'good-token', crBase: crBase + '/v1', pollMinutes: 10, friendlyTypes: ['friendly', 'clanMate'], inferTiebreak: true, linkWindowMinutes: 15, password: PW };
   const store = createMemoryStore();
   poller = createPoller({ store, config: cfg, log: { info() {} } });
   app = http.createServer(await createApp({ store, poller, cfg }));
@@ -56,10 +56,16 @@ test('full flow: players, manual log, sync, dedupe, merge, tombstones, import', 
   const manual = await call('POST', '/api/matches', { a: ava.id, b: lucas.id, ca: 1, cb: 2, playedAt: parseBattleTime(T1) + 5 * 60000, notes: 'gg', ranked: true, mode: 'Classic' });
   assert.equal(manual.status, 200);
 
-  // Sync
+  // Sync once with decks stripped (like matches imported before deck tracking existed)...
+  const saved = structuredClone(logs);
+  for (const tag in logs) for (const b of logs[tag]) for (const s of [...b.team, ...b.opponent]) { s.cards = []; s.supportCards = []; }
   const s1 = (await call('POST', '/api/sync')).body;
   assert.equal(s1.lastError, null);
-  assert.deepEqual(s1.lastResult, { checked: 3, found: 3, inserted: 2, linked: 1 });
+  assert.deepEqual(s1.lastResult, { checked: 3, found: 3, inserted: 2, linked: 1, enriched: 0 });
+  // ...then again with decks: the existing match gets them filled in
+  for (const tag in saved) logs[tag] = saved[tag];
+  const s1b = (await call('POST', '/api/sync')).body;
+  assert.equal(s1b.lastResult.enriched, 1);
 
   let league = (await call('GET', '/api/league', null, null)).body;
   assert.equal(league.matches.length, 3);
@@ -67,13 +73,22 @@ test('full flow: players, manual log, sync, dedupe, merge, tombstones, import', 
   assert.equal(merged.source, 'api');
   assert.equal(merged.notes, 'gg', 'manual notes survive the merge');
   assert.equal(merged.a, lucas.id); assert.equal(merged.ca, 3); assert.equal(merged.cb, 1);
+  assert.equal(merged.deckA.cards[0].id, 26000021, 'Lucas (side A) got the Hog deck');
+  assert.equal(merged.deckB.cards[0].id, 26000009);
+  assert.ok(league.cards.find(c => c.id === 26000021 && c.name === 'Hog Rider' && c.icon));
+  assert.equal(league.settings.timezone, 'America/Chicago');
   const tb = league.matches.find(m => m.tiebreak);
   assert.ok(tb && tb.ca === tb.cb && tb.winner !== 'draw');
   assert.equal(tb.mode, 'Triple Elixir Friendly');
 
   // Second sync imports nothing new
   const s2 = (await call('POST', '/api/sync')).body;
-  assert.equal(s2.lastResult.inserted, 0); assert.equal(s2.lastResult.linked, 0);
+  assert.equal(s2.lastResult.inserted, 0); assert.equal(s2.lastResult.linked, 0); assert.equal(s2.lastResult.enriched, 0);
+
+  // Unchanged league -> 304 with the ETag
+  const first = await fetch(base + '/api/league');
+  const again = await fetch(base + '/api/league', { headers: { 'If-None-Match': first.headers.get('etag') } });
+  assert.equal(again.status, 304);
 
   // Deleting an imported match keeps it from coming back
   const avaBen = league.matches.find(m => [m.a, m.b].sort().join() === [ava.id, ben.id].sort().join());
@@ -116,6 +131,6 @@ test('static files and path traversal', async () => {
   const idx = await fetch(base + '/');
   assert.equal(idx.status, 200);
   assert.match(await idx.text(), /<title>/);
-  assert.equal((await fetch(base + '/elo.js')).headers.get('content-type'), 'text/javascript; charset=utf-8');
+  assert.equal((await fetch(base + '/rating.js')).headers.get('content-type'), 'text/javascript; charset=utf-8');
   assert.equal((await fetch(base + '/..%2fpackage.json')).status, 404);
 });

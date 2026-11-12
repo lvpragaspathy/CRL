@@ -1,12 +1,12 @@
 # CR Friends League
 
-A Clash Royale friendly-battle league for you and your friends: Elo ratings, profiles, head-to-head records, and **automatic match tracking** from the official Clash Royale API.
+A Clash Royale friendly-battle league for you and your friends: Glicko-2 ratings, monthly seasons with champions, win probabilities, decks and card stats, and **automatic match tracking** from the official Clash Royale API.
 
 Every few minutes the server pulls each tagged player's battle log, keeps the 1v1 friendlies between two league members, and adds them to the league. You can still log, edit or delete matches by hand.
 
 ```
 public/          the UI (plain HTML + ES modules, no build step)
-  elo.js         rating engine (shared by the UI and the tests)
+  rating.js      Glicko-2 + seasons + card stats (shared by the UI and the tests)
 src/
   server.js      HTTP server + REST API + static files
   poller.js      battle log polling, dedupe, merge with manual entries
@@ -64,6 +64,7 @@ Already have data in the Claude-hosted version? Click **Copy data as JSON** ther
 | `INFER_TIEBREAK` | `true` | Decide level-crown battles by tower HP. |
 | `LINK_WINDOW_MINUTES` | `15` | How close a manual entry has to be to merge with an import. |
 | `LEAGUE_PASSWORD` | none | Required for any edits. Viewing is always public. |
+| `LEAGUE_TIMEZONE` | `America/Chicago` | Seasons roll over at midnight on the 1st in this IANA time zone. |
 
 ## Run locally
 
@@ -92,9 +93,12 @@ Reads are public. Writes need the `X-League-Password` header.
 
 ## Ratings
 
-Ratings are never stored. The UI replays every match in time order (`public/elo.js`):
+Ratings are never stored. The UI replays every match in time order (`public/rating.js`).
 
-- Start at 1000. Expected score is `1 / (1 + 10^((Rb − Ra)/400))`; change is `K × margin × (actual − expected)`.
-- K = 40 for your first 10 rated games, then 24.
-- Margin multiplier: 2-crown win ×1.15, 3-crown win ×1.3.
-- Editing an old match automatically corrects every rating after it.
+**Glicko-2** (Glickman 2012). Each player has a rating *r* (starts 1500), a rating deviation *RD* (starts 350: how unsure the rating is) and a volatility *σ*. Every game is its own rating period, and each idle day adds a period's worth of uncertainty before the next game, so RD grows while someone is away. The implementation is checked against the worked example in Glickman's paper (`test/rating.test.js`).
+
+**Win probability** for A vs B: `1 / (1 + exp(-g(√(φA² + φB²)) · (μA − μB)))`, where `g(φ) = 1/√(1 + 3φ²/π²)`. Two uncertain ratings pull the odds toward 50%. A win the model gave under 35% is marked as an upset.
+
+**Seasons** are calendar months in `LEAGUE_TIMEZONE`. At each rollover every rating moves halfway back to 1500 and RD is raised to at least 150, so the first few games of a month are placements. The champion is the highest rating at month's end with 5+ battles. The "All time" view runs the same model with no resets.
+
+**Decks** come from the battle log for auto-imported matches, stored compactly on each match (`{cards: [{id, evo}], tower}`) with names, elixir and icons in a separate `cards` table. Battles imported before deck tracking existed get their decks filled in while they're still in someone's last 25 battles.

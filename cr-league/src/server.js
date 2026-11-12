@@ -32,8 +32,13 @@ export async function createApp({ store, poller, cfg = config }) {
     catch { throw new HttpError(400, 'The request body is not valid JSON.'); }
   }
   async function snapshot() {
-    const [league, players, matches] = await Promise.all([store.getLeague(), store.listPlayers(), store.listMatches()]);
-    return { league, players, matches, sync: poller.status(), auth: { editable: !!pwHash } };
+    const [league, players, matches, cards] = await Promise.all([store.getLeague(), store.listPlayers(), store.listMatches(), store.listCards()]);
+    return {
+      league, players, cards,
+      matches: matches.map(({ deleted, ...m }) => m),
+      settings: { timezone: cfg.timezone || 'America/Chicago' },
+      sync: poller.status(), auth: { editable: !!pwHash },
+    };
   }
   async function assertPlayers(...ids) {
     for (const id of ids) if (!(await store.getPlayer(id))) throw new HttpError(400, 'One of those players is no longer in the league.');
@@ -147,6 +152,13 @@ export async function createApp({ store, poller, cfg = config }) {
       if (auth) await requireAuth(req);
       const body = ['POST', 'PATCH', 'PUT'].includes(req.method) ? await readJson(req) : {};
       const out = await fn(req, re.exec(url.pathname).slice(1), body);
+      if (req.method === 'GET') {
+        const json = JSON.stringify(out ?? { ok: true });
+        const etag = '"' + createHash('sha1').update(json).digest('base64url') + '"';
+        if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache' }).end(); return; }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-cache', ETag: etag });
+        res.end(json); return;
+      }
       send(200, out ?? { ok: true });
     } catch (e) {
       if (e instanceof HttpError) return send(e.status, { error: e.message });

@@ -62,10 +62,46 @@ export function battleToMatch(battle, leagueTags, { types, inferTiebreak = true 
     const ha = minTowerHp(A), hb = minTowerHp(B);
     if (ha != null && hb != null && ha !== hb) { winner = ha > hb ? 'a' : 'b'; tiebreak = true; }
   }
+  const da = extractDeck(A), db = extractDeck(B);
   return {
     battleKey: battleKey(battle.battleTime, aTag, bTag),
     aTag, bTag, ca, cb, winner, tiebreak, playedAt,
     mode: prettyMode(battle.gameMode?.name),
+    deckA: da?.deck || null,
+    deckB: db?.deck || null,
+    cards: [...(da?.catalog || []), ...(db?.catalog || [])],
+  };
+}
+
+/* ---------- decks ----------
+ * Matches store a compact deck ({cards: [{id, evo}], tower: id}); names, elixir and icon URLs live in a
+ * separate card catalog so the league payload stays small. */
+const ICON_RE = /^https:\/\/api-assets\.clashroyale\.com\/[\w\-./%]+$/;
+const safeIcon = u => (typeof u === 'string' && ICON_RE.test(u) ? u : '');
+
+export function cardInfo(c) {
+  const icons = c.iconUrls || {};
+  return {
+    id: Number(c.id) || 0,
+    name: typeof c.name === 'string' ? c.name.slice(0, 40) : 'Unknown card',
+    elixir: Number.isFinite(c.elixirCost) ? c.elixirCost : null,
+    rarity: typeof c.rarity === 'string' ? c.rarity.slice(0, 12) : '',
+    icon: safeIcon(icons.medium),
+    iconEvo: safeIcon(icons.evolutionMedium),
+  };
+}
+
+/** One side's deck from a battle log entry, or null if the log has no cards for it. */
+export function extractDeck(side) {
+  const raw = Array.isArray(side?.cards) ? side.cards.filter(c => c && Number(c.id)).slice(0, 8) : [];
+  if (!raw.length) return null;
+  const towerRaw = Array.isArray(side.supportCards) ? side.supportCards.find(c => c && Number(c.id)) : null;
+  return {
+    deck: {
+      cards: raw.map(c => ({ id: Number(c.id), evo: Number(c.evolutionLevel) > 0 })),
+      tower: towerRaw ? Number(towerRaw.id) : null,
+    },
+    catalog: [...raw, ...(towerRaw ? [towerRaw] : [])].map(cardInfo),
   };
 }
 
