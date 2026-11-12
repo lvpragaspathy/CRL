@@ -1,4 +1,8 @@
 // All settings come from environment variables so Railway can set them in the dashboard.
+function validTz(tz) {
+  if (!tz) return '';
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { console.warn(`Unknown LEAGUE_TIMEZONE "${tz}", using America/Chicago.`); return ''; }
+}
 const bool = (v, dflt) => (v == null || v === '' ? dflt : /^(1|true|yes|on)$/i.test(v));
 
 export const config = {
@@ -21,6 +25,9 @@ export const config = {
   inferTiebreak: bool(process.env.INFER_TIEBREAK, true),
   // A manually logged match within this window of an imported battle (same two players) gets merged.
   linkWindowMinutes: Math.max(1, Number(process.env.LINK_WINDOW_MINUTES) || 15),
+
+  // Seasons run by calendar month in this time zone (IANA name).
+  timezone: validTz(process.env.LEAGUE_TIMEZONE) || 'America/Chicago',
 
   // Shared password for anything that changes data. Viewing is always public.
   password: process.env.LEAGUE_PASSWORD || '',

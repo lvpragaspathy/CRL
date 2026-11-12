@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normTag, isValidTag, parseBattleTime, battleToMatch, prettyMode, battleKey } from '../src/battles.js';
 import { logs, TAGS, T1, T2 } from './fixtures.js';
+import { extractDeck } from '../src/battles.js';
 
 const league = new Set([TAGS.lucas, TAGS.ava, TAGS.ben]);
 const opts = { types: ['friendly', 'clanMate'], inferTiebreak: true };
@@ -48,4 +49,23 @@ test('ignores ladder, non-members and 2v2', () => {
 test('prettyMode', () => {
   assert.equal(prettyMode('TripleElixir_Friendly'), 'Triple Elixir Friendly');
   assert.equal(prettyMode(undefined), 'Classic');
+});
+
+test('decks: compact deck per side plus a card catalog, evolutions flagged', () => {
+  const m = battleToMatch(logs[TAGS.lucas][0], league, opts);
+  assert.equal(m.deckA.cards.length, 8);
+  assert.deepEqual(m.deckA.cards[3], { id: 26000010, evo: true });
+  assert.equal(m.deckA.tower, 159000000);
+  assert.equal(m.deckB.cards[0].id, 26000009, 'Ava (side B) has the Golem deck');
+  const skel = m.cards.find(c => c.id === 26000010);
+  assert.equal(skel.elixir, 1);
+  assert.match(skel.iconEvo, /_evo\.png$/);
+  // Same battle from Ava's log gives the same orientation
+  assert.deepEqual(battleToMatch(logs[TAGS.ava][0], league, opts).deckA, m.deckA);
+});
+
+test('decks: missing cards -> null, foreign icon hosts dropped', () => {
+  assert.equal(extractDeck({ cards: [] }), null);
+  const d = extractDeck({ cards: [{ id: 1, name: 'X', iconUrls: { medium: 'https://evil.example/x.png' } }] });
+  assert.equal(d.catalog[0].icon, '');
 });

@@ -5,6 +5,7 @@ export function createMemoryStore() {
   let league = { name: 'Friendly Battle League' };
   const players = new Map();
   const matches = new Map();
+  const cards = new Map();
 
   return {
     kind: 'memory',
@@ -44,6 +45,13 @@ export function createMemoryStore() {
       // Imported battles are kept as tombstones so the poller doesn't re-import them.
       if (m.battleKey) m.deleted = true; else matches.delete(id);
     },
+    async upsertCards(list) {
+      for (const c of list) {
+        const prev = cards.get(c.id);
+        cards.set(c.id, { ...c, icon: c.icon || prev?.icon || '', iconEvo: c.iconEvo || prev?.iconEvo || '' });
+      }
+    },
+    async listCards() { return [...cards.values()].map(clone); },
     async findMatchByKey(key) { return clone([...matches.values()].find(m => m.battleKey === key) || null); },
     async findLinkCandidates(a, b, t, windowMs) {
       return [...matches.values()].filter(m => !m.deleted && !m.battleKey &&

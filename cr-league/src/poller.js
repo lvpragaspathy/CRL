@@ -23,10 +23,21 @@ function explain(status, tag) {
  * 'linked' (merged into a matching manual entry), or 'inserted'.
  */
 export async function ingestBattle(store, m, { linkWindowMs }) {
-  if (await store.findMatchByKey(m.battleKey)) return 'exists';
+  const existing = await store.findMatchByKey(m.battleKey);
+  if (existing) {
+    // Matches imported before deck tracking existed get their decks filled in while the battle is
+    // still in someone's last 25.
+    if (!existing.deleted && !existing.deckA && !existing.deckB && (m.deckA || m.deckB)) {
+      const flipped = existing.a === m.b;
+      await store.updateMatch(existing.id, flipped ? { deckA: m.deckB, deckB: m.deckA } : { deckA: m.deckA, deckB: m.deckB });
+      return 'enriched';
+    }
+    return 'exists';
+  }
   const apiFields = {
     a: m.a, b: m.b, ca: m.ca, cb: m.cb, winner: m.winner, playedAt: m.playedAt,
     mode: m.mode, source: 'api', battleKey: m.battleKey, tiebreak: m.tiebreak,
+    deckA: m.deckA || null, deckB: m.deckB || null,
   };
   const candidates = await store.findLinkCandidates(m.a, m.b, m.playedAt, linkWindowMs);
   if (candidates.length) {
@@ -73,7 +84,8 @@ export function createPoller({ store, config, log = console }) {
     if (status.running) return status;
     status.running = true;
     status.lastRunAt = Date.now();
-    const result = { checked: 0, found: 0, inserted: 0, linked: 0 };
+    const result = { checked: 0, found: 0, inserted: 0, linked: 0, enriched: 0 };
+    const catalog = new Map();
     const errors = [];
     try {
       const players = (await store.listPlayers()).filter(p => p.tag);
@@ -89,6 +101,7 @@ export function createPoller({ store, config, log = console }) {
           for (const b of battles) {
             const m = battleToMatch(b, leagueTags, { types: config.friendlyTypes, inferTiebreak: config.inferTiebreak });
             if (m && !parsed.has(m.battleKey)) parsed.set(m.battleKey, m);
+            if (m) for (const c of m.cards) if (c.id && !catalog.has(c.id)) catalog.set(c.id, c);
           }
         } catch (e) {
           errors.push(e.status === 404 ? `${p.name}: ${e.message}` : e.message);
@@ -97,12 +110,14 @@ export function createPoller({ store, config, log = console }) {
         await sleep(200);
       }
       result.found = parsed.size;
+      if (catalog.size) await store.upsertCards([...catalog.values()]);
       // Oldest first, so ties in playedAt keep a stable order.
       for (const m of [...parsed.values()].sort((x, y) => x.playedAt - y.playedAt)) {
         const r = await ingestBattle(store, { ...m, a: byTag.get(m.aTag).id, b: byTag.get(m.bTag).id },
           { linkWindowMs: config.linkWindowMinutes * 60000 });
         if (r === 'inserted') result.inserted++;
         if (r === 'linked') result.linked++;
+        if (r === 'enriched') result.enriched++;
       }
     } catch (e) {
       errors.push(`Sync failed: ${e.message}`);
@@ -112,8 +127,8 @@ export function createPoller({ store, config, log = console }) {
     status.lastResult = result;
     status.lastError = errors.length ? [...new Set(errors)].join(' ') : null;
     if (!errors.length) status.lastOkAt = Date.now();
-    if (result.inserted || result.linked || errors.length) {
-      log.info?.(`[sync] checked ${result.checked}, found ${result.found}, new ${result.inserted}, merged ${result.linked}${errors.length ? ', errors: ' + status.lastError : ''}`);
+    if (result.inserted || result.linked || result.enriched || errors.length) {
+      log.info?.(`[sync] checked ${result.checked}, found ${result.found}, new ${result.inserted}, merged ${result.linked}, decks added ${result.enriched}${errors.length ? ', errors: ' + status.lastError : ''}`);
     }
     return status;
   }
