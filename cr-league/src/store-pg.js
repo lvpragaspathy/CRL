@@ -12,13 +12,13 @@ export async function createPgStore(url, { ssl = false } = {}) {
   const toMatch = r => r && ({
     id: r.id, a: r.a, b: r.b, ca: r.ca, cb: r.cb, winner: r.winner, playedAt: r.played_at, createdAt: r.created_at,
     mode: r.mode, notes: r.notes, ranked: r.ranked, source: r.source, battleKey: r.battle_key, tiebreak: r.tiebreak,
-    deckA: r.deck_a || null, deckB: r.deck_b || null, deleted: r.deleted,
+    deckA: r.deck_a || null, deckB: r.deck_b || null, stats: r.stats || null, deleted: r.deleted,
   });
   const P_COLS = { name: 'name', tag: 'tag', color: 'color', deck: 'deck', archived: 'archived' };
   const M_COLS = {
     a: 'a', b: 'b', ca: 'ca', cb: 'cb', winner: 'winner', playedAt: 'played_at', mode: 'mode', notes: 'notes',
     ranked: 'ranked', source: 'source', battleKey: 'battle_key', tiebreak: 'tiebreak',
-    deckA: 'deck_a', deckB: 'deck_b',
+    deckA: 'deck_a', deckB: 'deck_b', stats: 'stats',
   };
   // Stringify decks ourselves: node-postgres would turn a top-level array into a Postgres array, not JSON.
   const jsonOrNull = v => (v == null ? null : JSON.stringify(v));
@@ -27,7 +27,7 @@ export async function createPgStore(url, { ssl = false } = {}) {
     if (!keys.length) return (await q(`SELECT * FROM ${table} WHERE id = $1`, [id])).rows[0];
     const sets = keys.map((k, i) => `${cols[k]} = $${i + 2}`).join(', ');
     const extra = table === 'matches' ? ' AND NOT deleted' : '';
-    const vals = keys.map(k => (k === 'deckA' || k === 'deckB' ? jsonOrNull(fields[k]) : fields[k]));
+    const vals = keys.map(k => (['deckA', 'deckB', 'stats'].includes(k) ? jsonOrNull(fields[k]) : fields[k]));
     return (await q(`UPDATE ${table} SET ${sets} WHERE id = $1${extra} RETURNING *`, [id, ...vals])).rows[0];
   }
 
@@ -66,6 +66,13 @@ export async function createPgStore(url, { ssl = false } = {}) {
         CREATE INDEX IF NOT EXISTS matches_pair_time ON matches (a, b, played_at);
         ALTER TABLE matches ADD COLUMN IF NOT EXISTS deck_a JSONB;
         ALTER TABLE matches ADD COLUMN IF NOT EXISTS deck_b JSONB;
+        ALTER TABLE matches ADD COLUMN IF NOT EXISTS stats JSONB;
+        CREATE TABLE IF NOT EXISTS battles_raw (
+          battle_key TEXT PRIMARY KEY,
+          played_at BIGINT NOT NULL,
+          fetched_at BIGINT NOT NULL,
+          data JSONB NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS cards (
           id BIGINT PRIMARY KEY,
           name TEXT NOT NULL,
@@ -112,11 +119,11 @@ export async function createPgStore(url, { ssl = false } = {}) {
     async listMatches() { return (await q(`SELECT * FROM matches WHERE NOT deleted ORDER BY played_at, created_at`)).rows.map(toMatch); },
     async getMatch(id) { return toMatch((await q(`SELECT * FROM matches WHERE id = $1 AND NOT deleted`, [id])).rows[0]) || null; },
     async insertMatch(m) {
-      const r = await q(`INSERT INTO matches (id, a, b, ca, cb, winner, played_at, created_at, mode, notes, ranked, source, battle_key, tiebreak, deck_a, deck_b)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      const r = await q(`INSERT INTO matches (id, a, b, ca, cb, winner, played_at, created_at, mode, notes, ranked, source, battle_key, tiebreak, deck_a, deck_b, stats)
+                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                          ON CONFLICT DO NOTHING`,
         [m.id, m.a, m.b, m.ca, m.cb, m.winner, m.playedAt, m.createdAt, m.mode, m.notes, m.ranked,
-          m.source || 'manual', m.battleKey || null, !!m.tiebreak, jsonOrNull(m.deckA), jsonOrNull(m.deckB)]);
+          m.source || 'manual', m.battleKey || null, !!m.tiebreak, jsonOrNull(m.deckA), jsonOrNull(m.deckB), jsonOrNull(m.stats)]);
       return r.rowCount === 1;
     },
     async updateMatch(id, fields) { return toMatch(await patch('matches', M_COLS, id, fields)) || null; },
@@ -134,6 +141,11 @@ export async function createPgStore(url, { ssl = false } = {}) {
           [c.id, c.name, c.elixir, c.rarity, c.icon, c.iconEvo]);
       }
     },
+    async saveRaw(key, data, playedAt) {
+      await q(`INSERT INTO battles_raw (battle_key, played_at, fetched_at, data) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+        [key, playedAt, Date.now(), JSON.stringify(data)]);
+    },
+    async countRaw() { return Number((await q(`SELECT COUNT(*) AS n FROM battles_raw`)).rows[0].n); },
     async listCards() {
       return (await q(`SELECT * FROM cards`)).rows.map(r => ({ id: r.id, name: r.name, elixir: r.elixir, rarity: r.rarity, icon: r.icon, iconEvo: r.icon_evo }));
     },

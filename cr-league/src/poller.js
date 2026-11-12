@@ -23,21 +23,25 @@ function explain(status, tag) {
  * 'linked' (merged into a matching manual entry), or 'inserted'.
  */
 export async function ingestBattle(store, m, { linkWindowMs }) {
+  // Keep the full battle JSON: the log only holds 25 battles, so anything we don't save now is gone.
+  if (m.raw) await store.saveRaw(m.battleKey, m.raw, m.playedAt);
   const existing = await store.findMatchByKey(m.battleKey);
   if (existing) {
-    // Matches imported before deck tracking existed get their decks filled in while the battle is
+    // Fill in whatever an older import didn't capture (decks, elixir/HP stats) while the battle is
     // still in someone's last 25.
-    if (!existing.deleted && !existing.deckA && !existing.deckB && (m.deckA || m.deckB)) {
-      const flipped = existing.a === m.b;
-      await store.updateMatch(existing.id, flipped ? { deckA: m.deckB, deckB: m.deckA } : { deckA: m.deckA, deckB: m.deckB });
-      return 'enriched';
-    }
-    return 'exists';
+    if (existing.deleted) return 'exists';
+    const flipped = existing.a === m.b;
+    const fill = {};
+    if (!existing.deckA && !existing.deckB && (m.deckA || m.deckB)) Object.assign(fill, flipped ? { deckA: m.deckB, deckB: m.deckA } : { deckA: m.deckA, deckB: m.deckB });
+    if (!existing.stats && m.stats) fill.stats = flipped ? { a: m.stats.b, b: m.stats.a } : m.stats;
+    if (!Object.keys(fill).length) return 'exists';
+    await store.updateMatch(existing.id, fill);
+    return 'enriched';
   }
   const apiFields = {
     a: m.a, b: m.b, ca: m.ca, cb: m.cb, winner: m.winner, playedAt: m.playedAt,
     mode: m.mode, source: 'api', battleKey: m.battleKey, tiebreak: m.tiebreak,
-    deckA: m.deckA || null, deckB: m.deckB || null,
+    deckA: m.deckA || null, deckB: m.deckB || null, stats: m.stats || null,
   };
   const candidates = await store.findLinkCandidates(m.a, m.b, m.playedAt, linkWindowMs);
   if (candidates.length) {

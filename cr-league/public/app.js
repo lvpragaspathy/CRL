@@ -1,6 +1,10 @@
 import {
-  START_R, MIN_CHAMP_GAMES, computeLeague, tier, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir,
+  START_R, MIN_CHAMP_GAMES, computeLeague, tier, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
 } from './rating.js';
+import {
+  hpInfo, clutch, leaks, tilt, heatmap, meta, race, records, weekly, scorePreds, calibration, eloPreds, tune, GRID,
+  CLOSE_HP, SESSION_GAP_MIN,
+} from './stats.js';
 
 /* ---------- constants ---------- */
 const MODES = ['Classic', 'Triple Elixir', 'Draft', 'Sudden Death', 'Mega Deck', 'Other'];
@@ -25,6 +29,7 @@ const S = {
   tz: 'America/Chicago',
   pa: '', pb: '',      // matchup predictor picks
   matchLimit: 50,
+  tune: null,          // last Lab tuning result
 };
 const D = () => S.demo || S.data;
 const writable = () => !!S.demo || (S.editable && S.unlocked);
@@ -204,6 +209,9 @@ function matchRow(m, data, view) {
   const pA = dl.pA;
   const pWin = m.winner === 'a' ? pA : m.winner === 'b' ? 1 - pA : null;
   const upset = m.ranked && pWin != null && pWin < 0.35;
+  const hp = hpInfo(m);
+  const lA = m.stats?.a?.leaked, lB = m.stats?.b?.leaked;
+  const detail = [hp ? `Towers left: ${hp.hpA.toLocaleString()} vs ${hp.hpB.toLocaleString()} HP` : '', Number.isFinite(lA) && Number.isFinite(lB) ? `Elixir leaked: ${lA.toFixed(1)} vs ${lB.toFixed(1)}` : ''].filter(Boolean).join(' · ');
   const side = (p, cls, won, d) => `<div class="side ${cls}${won ? ' won' : ''}">
       ${cls === 'b' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
       ${won && cls === 'b' ? CROWN : ''}
@@ -218,10 +226,11 @@ function matchRow(m, data, view) {
   return `<div class="match">
     <div class="when"><b>${esc(when.day)}${m.source === 'api' ? '<span class="auto" title="Imported from the Clash Royale battle log">Auto</span>' : ''}</b>${esc(when.time)} · ${esc(m.mode)}${m.ranked ? '' : ' · <span class="unranked">unrated</span>'}${m.notes ? `<br>${esc(m.notes)}` : ''}</div>
     ${side(A, 'a', m.winner === 'a', dl.a)}
-    <div class="score-wrap">
+    <div class="score-wrap"${detail ? ` title="${esc(detail)}"` : ''}>
       <div class="score num"><span class="a">${m.ca}</span><span class="dash">–</span><span class="b">${m.cb}</span></div>
-      ${upset ? `<div class="score-note upset" title="The winner had a ${fmtPct(pWin)} chance before the match">Upset · ${fmtPct(pWin)}</div>` : tieNote ? `<div class="score-note">${tieNote}</div>` : ''}
+      ${upset ? `<div class="score-note upset" title="The winner had a ${fmtPct(pWin)} chance before the match">Upset · ${fmtPct(pWin)}</div>` : tieNote ? `<div class="score-note">${tieNote}</div>` : hp?.close ? `<div class="score-note close">Close</div>` : ''}
       ${pA != null && !upset ? `<div class="odds" title="Win chances before the match"><span class="a">${fmtPct(pA)}</span><span class="b">${fmtPct(1 - pA)}</span></div>` : ''}
+      ${detail ? `<div class="hpline">${hp ? `${hp.hpA >= hp.hpB ? '+' : '−'}${Math.abs(R0(hp.hpA - hp.hpB)).toLocaleString()} HP` : ''}</div>` : ''}
     </div>
     ${side(B, 'b', m.winner === 'b', dl.b)}
     ${acts}
@@ -438,6 +447,7 @@ function viewPlayer(id, data, L, view) {
     if (!best || opp > best.r) best = { r: opp, oppId: isA ? m.b : m.a };
   }
   const titles = L.champions.filter(c => c.id === id);
+  const pcl = clutch(data, view).find(r => r.id === id), plk = leaks(data, view).find(r => r.id === id);
   const h2h = Object.entries(s.h2h).sort((a, b) => b[1].n - a[1].n);
   const w = writable();
   const points = [{ r: START_R, rd: 350 }, ...(L.timeline[id] || [])];
@@ -469,6 +479,9 @@ function viewPlayer(id, data, L, view) {
       <div><div class="k">3-crown wins</div><div class="v num">${s.three}</div></div>
       <div><div class="k">Streak</div><div class="v">${s.streakT ? `<span class="${s.streakT === 'W' ? 'up' : 'down'}">${s.streakT}${s.streakN}</span>` : '—'}</div></div>
       <div><div class="k">Best streak</div><div class="v num">${s.best ? 'W' + s.best : '—'}</div></div>
+      <div><div class="k" title="Draws, tiebreakers and 1-crown games won by ${CLOSE_HP.toLocaleString()} HP or less">Close games</div><div class="v num">${pcl && pcl.close.n ? rec3(pcl.close) : '—'}</div></div>
+      <div><div class="k" title="Average remaining tower HP minus the opponent's">HP edge</div><div class="v num ${pcl ? (pcl.avgMargin >= 0 ? 'up' : 'down') : ''}">${pcl ? (pcl.avgMargin >= 0 ? '+' : '−') + Math.abs(R0(pcl.avgMargin)).toLocaleString() : '—'}</div></div>
+      <div><div class="k">Elixir leaked</div><div class="v num">${plk ? plk.avg.toFixed(1) : '—'}<span class="muted" style="font-size:14px">${plk ? ' / game' : ''}</span></div></div>
     </div>
   </section>
   <div class="grid2">
@@ -491,6 +504,249 @@ function viewPlayer(id, data, L, view) {
   </section>`;
 }
 
+/* ---------- Stats tab ---------- */
+const nameOf = (data, id) => esc(data.players[id]?.name || '?');
+const pctOrDash = v => (v == null ? '—' : fmtPct(v));
+const rec3 = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
+
+function raceChart(data, RC) {
+  if (!RC.series.length) return '<p class="muted" style="margin:0">No rated battles in this view yet.</p>';
+  const W = 760, H = 300, l = 46, r = 120, t = 14, b = 28;
+  const rs = RC.series.flatMap(s => s.pts.map(p => p.r));
+  const step = Math.max(...rs) - Math.min(...rs) > 400 ? 100 : 50;
+  let lo = Math.floor((Math.min(...rs) - 20) / step) * step, hi = Math.ceil((Math.max(...rs) + 20) / step) * step;
+  if (hi - lo < step * 3) { lo -= step; hi += step; }
+  const span = Math.max(1, RC.end - RC.start);
+  const x = tt => l + ((Math.min(RC.end, Math.max(RC.start, tt)) - RC.start) / span) * (W - l - r);
+  const y = v => t + (1 - (v - lo) / (hi - lo)) * (H - t - b);
+  let g = '';
+  for (let v = lo; v <= hi; v += step) g += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+  // Step lines: a rating holds until the next game.
+  const lines = RC.series.map(s => {
+    const p = data.players[s.id];
+    let d = `M${x(s.pts[0].t).toFixed(1)} ${y(s.pts[0].r).toFixed(1)}`;
+    for (let i = 1; i < s.pts.length; i++) d += `H${x(s.pts[i].t).toFixed(1)}V${y(s.pts[i].r).toFixed(1)}`;
+    return `<path class="rline" d="${d}" style="stroke:${esc(p.color)}"><title>${esc(p.name)}</title></path>`;
+  }).join('');
+  // End labels, nudged apart so names don't overlap.
+  const labels = RC.series.map(s => ({ s, y: y(s.last) })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 15) labels[i].y = labels[i - 1].y + 15;
+  const lab = labels.map(({ s, y: yy }) => { const p = data.players[s.id]; return `<circle cx="${W - r}" cy="${y(s.last).toFixed(1)}" r="3.5" style="fill:${esc(p.color)}"/><text class="rlab" x="${W - r + 8}" y="${(yy + 4).toFixed(1)}" style="fill:${esc(p.color)}">${esc(p.name.length > 11 ? p.name.slice(0, 10) + '…' : p.name)} ${R0(s.last)}</text>`; }).join('');
+  const d0 = new Date(RC.start), d1 = new Date(RC.end);
+  const fmt = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating race: ${RC.series.map(s => `${esc(data.players[s.id].name)} ${R0(s.last)}`).join(', ')}">
+    ${g}<line class="base" x1="${l}" x2="${W - r}" y1="${y(1500)}" y2="${y(1500)}"/>${lines}${lab}
+    <text x="${l}" y="${H - 6}">${fmt(d0)}</text><text x="${W - r}" y="${H - 6}" text-anchor="end">${fmt(d1)}</text>
+  </svg>`;
+}
+const R0 = v => Math.round(v);
+
+function heatmapHtml(hm) {
+  if (!hm.total) return '<p class="muted" style="margin:0">No battles in this view yet.</p>';
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const hourLbl = h => (h === 0 ? '12a' : h === 12 ? '12p' : h < 12 ? h + 'a' : (h - 12) + 'p');
+  let busiest = { n: 0 };
+  hm.grid.forEach((row, d) => row.forEach((n, h) => { if (n > busiest.n) busiest = { n, d, h }; }));
+  return `<div class="heat" role="img" aria-label="Battles by day and hour. Busiest: ${days[busiest.d]} around ${hourLbl(busiest.h)}.">
+    <span></span>${Array.from({ length: 24 }, (_, h) => `<span class="hh">${h % 6 === 0 ? hourLbl(h) : ''}</span>`).join('')}
+    ${hm.grid.map((row, d) => `<span class="hd">${days[d]}</span>${row.map((n, h) => `<i style="--a:${n ? (0.18 + 0.82 * n / hm.max).toFixed(2) : 0}" title="${days[d]} ${hourLbl(h)}: ${n} battle${n === 1 ? '' : 's'}"></i>`).join('')}`).join('')}
+  </div>
+  <p class="muted chart-note">Busiest slot: <b>${days[busiest.d]} around ${hourLbl(busiest.h)}</b> (${busiest.n} battle${busiest.n === 1 ? '' : 's'}). Times are in ${esc(tz().replace('_', ' '))}.</p>`;
+}
+
+function recordCard(data, r) {
+  const who = r.who.map(id => `<a href="#p-${esc(id)}">${avatar(data.players[id])}<b>${nameOf(data, id)}</b></a>`).join('');
+  const sub = [r.vs ? `vs ${nameOf(data, r.vs)}` : '', r.season ? esc(seasonLabel(r.season)) : '', r.when ? esc(fmtDate(r.when, false)) : ''].filter(Boolean).join(' · ');
+  return `<div class="record${r.shame ? ' shame' : ''}"><div class="rk">${esc(r.title)}</div><div class="rv">${esc(r.value)}</div><div class="rw">${who}</div><div class="rs muted">${sub}</div></div>`;
+}
+
+function viewStats(data, L, view) {
+  if (!Object.keys(data.players).length) return viewEmpty();
+  const key = S.season === 'all' ? 'all' : (S.season || L.currentKey);
+  const RC = race(data, L, key, tz());
+  const rec = records(data, L, tz());
+  const cl = clutch(data, view), lk = leaks(data, view), tl = tilt(data, view).filter(r => r.afterW.n + r.afterL.n >= 2);
+  const mt = meta(data, view), hm = heatmap(view, tz());
+  const hpGames = view.ms.filter(m => hpInfo(m)).length;
+
+  const clutchTbl = cl.length ? `<table><thead><tr><th>Player</th><th>Close games</th><th class="r">Win %</th><th class="r" title="Average remaining tower HP minus the opponent's">HP edge</th></tr></thead><tbody>
+    ${cl.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num">${r.close.n ? rec3(r.close) : '—'}</td><td class="num r ${r.closeRate == null ? '' : r.closeRate >= 0.5 ? 'up' : 'down'}">${pctOrDash(r.closeRate)}</td><td class="num r ${r.avgMargin >= 0 ? 'up' : 'down'}">${r.avgMargin >= 0 ? '+' : '−'}${Math.abs(R0(r.avgMargin)).toLocaleString()}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with tower HP.</p>';
+  const leakTbl = lk.length ? `<table><thead><tr><th>Player</th><th class="r">Leaked / game</th><th class="r">In wins</th><th class="r">In losses</th></tr></thead><tbody>
+    ${lk.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num r"><span class="leakbar"><i style="width:${Math.min(100, r.avg * 10)}%"></i></span>${r.avg.toFixed(1)}</td><td class="num r">${r.avgWin == null ? '—' : r.avgWin.toFixed(1)}</td><td class="num r">${r.avgLoss == null ? '—' : r.avgLoss.toFixed(1)}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with elixir data.</p>';
+  const tiltTbl = tl.length ? `<table><thead><tr><th>Player</th><th class="r">After a win</th><th class="r">After a loss</th><th class="r hide-sm">1st game of session</th><th class="r hide-sm">Later games</th></tr></thead><tbody>
+    ${tl.map(r => { const gap = r.afterWRate != null && r.afterLRate != null ? r.afterWRate - r.afterLRate : null; return `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a>${gap != null && Math.abs(gap) >= 0.2 && r.afterL.n >= 3 ? `<span class="chip ${gap > 0 ? 'tiltchip' : 'calmchip'}">${gap > 0 ? 'Tilts' : 'Bounces back'}</span>` : ''}</td>
+      <td class="num r">${pctOrDash(r.afterWRate)} <span class="muted">(${r.afterW.n})</span></td><td class="num r">${pctOrDash(r.afterLRate)} <span class="muted">(${r.afterL.n})</span></td>
+      <td class="num r hide-sm">${pctOrDash(r.firstRate)} <span class="muted">(${r.first.n})</span></td><td class="num r hide-sm">${pctOrDash(r.laterRate)} <span class="muted">(${r.later.n})</span></td></tr>`; }).join('')}
+    </tbody></table><p class="muted chart-note">Win rate in each situation, games in brackets. A new session starts after a ${SESSION_GAP_MIN}+ minute break. "Tilts" means 20+ points worse after a loss than after a win (3+ games).</p>` : '<p class="muted" style="margin:0">Not enough games yet.</p>';
+  const metaHtml = mt.decks ? `<div class="cardcols">
+      <div><h3 class="sub">Archetypes</h3><table><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
+        ${mt.archetypes.slice(0, 10).map(a => `<tr><td><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div><h3 class="sub">Most played cards</h3><table class="ctable"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
+        ${mt.cards.slice(0, 12).map(c => `<tr><td><span class="cname">${cardTile(c.card, ' sm')}<span>${esc(c.card.name)}</span></span></td><td class="r"><span class="usebar"><i style="width:${Math.round(c.usage * 100)}%"></i></span><span class="num">${fmtPct(c.usage)}</span></td><td class="r num ${c.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(c.rate)}</td></tr>`).join('')}
+      </tbody></table></div>
+    </div><p class="muted chart-note">From ${mt.decks} decks in auto-imported battles. Archetypes are named by their win conditions.</p>` : '<p class="muted" style="margin:0">Deck data fills in from auto-imported battles.</p>';
+
+  return seasonBar(L) + `
+  <section class="panel recap-panel">
+    <div class="panel-h"><h2>Weekly recap</h2><span class="muted" style="font-size:13px">Last 7 days, ready for the group chat</span></div>
+    <div class="panel-b recap">
+      <canvas id="recapCanvas" width="1080" height="1350" aria-label="Weekly recap image"></canvas>
+      <div class="recap-side">
+        <p class="muted" style="margin:0">A shareable image of the last 7 days: battles, the biggest climber, most wins, the upset of the week and the top 5.</p>
+        <div class="actions"><button class="btn primary" type="button" data-act="recap-dl">Download image</button><button class="btn" type="button" data-act="recap-copy" id="recapCopy">Copy image</button></div>
+      </div>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-h"><h2>${key === 'all' ? 'Rating race, all time' : 'Season race'}</h2><span class="muted" style="font-size:13px">Every rated battle, step by step</span></div>
+    <div class="panel-b">${raceChart(data, RC)}</div>
+  </section>
+  <section class="panel">
+    <div class="panel-h"><h2>Record book</h2><span class="muted" style="font-size:13px">All time</span></div>
+    <div class="panel-b records">${rec.length ? rec.map(r => recordCard(data, r)).join('') : '<p class="muted" style="margin:0">Records appear once a few battles are in.</p>'}</div>
+  </section>
+  <div class="grid2">
+    <section class="panel"><div class="panel-h"><h2>Clutch</h2><span class="muted" style="font-size:13px">${hpGames} battles with tower HP</span></div><div class="panel-b table-wrap">${clutchTbl}<p class="muted chart-note">Close game: a draw, a tiebreaker, or a 1-crown game won by ${CLOSE_HP.toLocaleString()} HP or less.</p></div></section>
+    <section class="panel"><div class="panel-h"><h2>Elixir leaked</h2><span class="muted" style="font-size:13px">Lower is better</span></div><div class="panel-b table-wrap">${leakTbl}</div></section>
+  </div>
+  <section class="panel"><div class="panel-h"><h2>League meta</h2></div><div class="panel-b">${metaHtml}</div></section>
+  <section class="panel"><div class="panel-h"><h2>Tilt check</h2></div><div class="panel-b table-wrap">${tiltTbl}</div></section>
+  <section class="panel"><div class="panel-h"><h2>When we play</h2></div><div class="panel-b">${heatmapHtml(hm)}</div></section>`;
+}
+
+/* ---------- weekly recap image ---------- */
+async function drawRecap(data, L) {
+  const cv = document.getElementById('recapCanvas'); if (!cv) return;
+  try { await document.fonts?.ready; } catch { /* fonts optional */ }
+  const W = 1080, H = 1350, x = cv.getContext('2d');
+  const wk = weekly(data, L);
+  const view = L.byKey[L.currentKey];
+  const top = ranking(data, view).filter(p => view.st[p.id].games > 0).slice(0, 5);
+  const DISP = '"Lilita One", "Arial Rounded MT Bold", sans-serif', BODY = 'Archivo, system-ui, sans-serif';
+  // Arena split background
+  x.fillStyle = '#0b1222'; x.fillRect(0, 0, W, H);
+  let g = x.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, 'rgba(74,144,255,.28)'); g.addColorStop(0.5, 'rgba(74,144,255,.05)'); g.addColorStop(0.5, 'rgba(255,83,103,.05)'); g.addColorStop(1, 'rgba(255,83,103,.26)');
+  x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.strokeStyle = 'rgba(255,198,58,.55)'; x.lineWidth = 3; x.beginPath(); x.moveTo(W * 0.62, 0); x.lineTo(W * 0.38, H); x.stroke();
+  // Crown
+  const crown = (cx, cy, s) => { x.fillStyle = '#ffc63a'; x.beginPath(); const p = [[2, 6], [7, 10], [12, 2], [17, 10], [22, 6], [20, 17], [4, 17]]; p.forEach(([a, b], i) => (i ? x.lineTo : x.moveTo).call(x, cx + a * s, cy + b * s)); x.closePath(); x.fill(); x.fillRect(cx + 4 * s, cy + 18 * s, 16 * s, 2.5 * s); };
+  crown(70, 70, 3.2);
+  x.fillStyle = '#8e9bc1'; x.font = `700 26px ${BODY}`; x.fillText('WEEKLY RECAP', 160, 104);
+  x.fillStyle = '#edf1ff'; x.font = `64px ${DISP}`; x.fillText(String(data.league.name || 'Friendly Battle League').slice(0, 26), 70, 200);
+  const fmt = t => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  x.fillStyle = '#8e9bc1'; x.font = `500 30px ${BODY}`; x.fillText(`${fmt(wk.from)} – ${fmt(wk.to)}`, 70, 250);
+  // Tiles
+  const tile = (tx, ty, w, label, value, sub, color = '#edf1ff') => {
+    x.fillStyle = 'rgba(19,28,52,.88)'; x.strokeStyle = '#26355c'; x.lineWidth = 2;
+    x.beginPath(); x.roundRect(tx, ty, w, 170, 22); x.fill(); x.stroke();
+    x.fillStyle = '#8e9bc1'; x.font = `700 22px ${BODY}`; x.fillText(label.toUpperCase(), tx + 28, ty + 46);
+    x.fillStyle = color; x.font = `58px ${DISP}`; x.fillText(value, tx + 28, ty + 112, w - 56);
+    if (sub) { x.fillStyle = '#8e9bc1'; x.font = `500 24px ${BODY}`; x.fillText(sub, tx + 28, ty + 150, w - 56); }
+  };
+  const nm = id => data.players[id]?.name || '?';
+  tile(70, 300, 455, 'Battles', String(wk.battles), `${wk.threes} three-crown${wk.threes === 1 ? '' : 's'}`);
+  tile(555, 300, 455, 'Top climber', wk.topGainer && wk.topGainer.net > 0 ? nm(wk.topGainer.id) : '—', wk.topGainer && wk.topGainer.net > 0 ? `+${R0(wk.topGainer.net)} rating` : 'Nobody climbed', '#3fd68f');
+  tile(70, 500, 455, 'Most wins', wk.mostWins && wk.mostWins.w ? nm(wk.mostWins.id) : '—', wk.mostWins && wk.mostWins.w ? `${rec3(wk.mostWins)} this week` : '');
+  const up = wk.upset;
+  tile(555, 500, 455, 'Upset of the week', up ? nm(up.m.winner === 'a' ? up.m.a : up.m.b) : '—', up ? `beat ${nm(up.m.winner === 'a' ? up.m.b : up.m.a)} at ${Math.round(up.p * 100)}%` : 'Favorites held', '#ffc63a');
+  // Standings
+  x.fillStyle = '#edf1ff'; x.font = `44px ${DISP}`; x.fillText(`${seasonLabel(L.currentKey)} top ${top.length || ''}`.trim(), 70, 760);
+  top.forEach((p, i) => {
+    const y0 = 800 + i * 92, s = view.st[p.id], wkRow = wk.rows.find(r => r.id === p.id);
+    x.fillStyle = i === 0 ? 'rgba(255,198,58,.12)' : 'rgba(19,28,52,.7)'; x.beginPath(); x.roundRect(70, y0, 940, 78, 16); x.fill();
+    x.fillStyle = i === 0 ? '#ffc63a' : '#8e9bc1'; x.font = `40px ${DISP}`; x.fillText(String(i + 1), 100, y0 + 53);
+    x.fillStyle = p.color; x.beginPath(); x.arc(185, y0 + 39, 25, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#0b1222'; x.font = `26px ${DISP}`; x.textAlign = 'center'; x.fillText(initials(p.name), 185, y0 + 49); x.textAlign = 'left';
+    x.fillStyle = '#edf1ff'; x.font = `700 34px ${BODY}`; x.fillText(p.name, 230, y0 + 51, 430);
+    x.textAlign = 'right';
+    if (wkRow && Math.round(wkRow.net)) { x.fillStyle = wkRow.net > 0 ? '#3fd68f' : '#f27b8b'; x.font = `700 28px ${BODY}`; x.fillText(`${wkRow.net > 0 ? '+' : '−'}${Math.abs(R0(wkRow.net))} this week`, 820, y0 + 50); }
+    x.fillStyle = i === 0 ? '#ffc63a' : '#edf1ff'; x.font = `44px ${DISP}`; x.fillText(String(R0(s.r)), 990, y0 + 55);
+    x.textAlign = 'left';
+  });
+  x.fillStyle = '#8e9bc1'; x.font = `500 24px ${BODY}`; x.fillText(location.host || 'friendly battle league', 70, H - 50);
+  const copy = document.getElementById('recapCopy');
+  if (copy && !(window.ClipboardItem && navigator.clipboard?.write)) copy.hidden = true;
+}
+function recapBlob() { return new Promise(res => document.getElementById('recapCanvas')?.toBlob(res, 'image/png') ?? res(null)); }
+
+/* ---------- Lab tab ---------- */
+function calibrationChart(cal) {
+  const W = 340, H = 300, l = 44, r = 14, t = 12, b = 36;
+  const x = v => l + ((v - 0.5) / 0.5) * (W - l - r), y = v => t + (1 - v) * (H - t - b);
+  const pts = cal.filter(c => c.n);
+  const maxN = Math.max(1, ...pts.map(c => c.n));
+  let g = '';
+  for (const v of [0.5, 0.6, 0.7, 0.8, 0.9, 1]) g += `<line class="grid" x1="${x(v)}" x2="${x(v)}" y1="${t}" y2="${H - b}"/><text x="${x(v)}" y="${H - b + 16}" text-anchor="middle">${Math.round(v * 100)}%</text>`;
+  for (const v of [0, 0.25, 0.5, 0.75, 1]) g += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 6}" y="${y(v) + 4}" text-anchor="end">${Math.round(v * 100)}%</text>`;
+  const path = pts.map((c, i) => (i ? 'L' : 'M') + x(c.predicted).toFixed(1) + ' ' + y(c.actual).toFixed(1)).join('');
+  return `<svg class="chart cal" viewBox="0 0 ${W} ${H}" role="img" aria-label="Calibration: ${pts.map(c => `predicted ${fmtPct(c.predicted)}, actual ${fmtPct(c.actual)} over ${c.n} games`).join('; ')}">
+    ${g}<line class="diag" x1="${x(0.5)}" y1="${y(0.5)}" x2="${x(1)}" y2="${y(1)}"/>
+    <path class="line" d="${path}"/>
+    ${pts.map(c => `<circle class="calpt" cx="${x(c.predicted).toFixed(1)}" cy="${y(c.actual).toFixed(1)}" r="${(4 + 8 * Math.sqrt(c.n / maxN)).toFixed(1)}"><title>${fmtPct(c.lo)}–${fmtPct(c.hi)} favorites: predicted ${fmtPct(c.predicted)}, won ${fmtPct(c.actual)} (${c.n} games)</title></circle>`).join('')}
+    <text x="${(l + W - r) / 2}" y="${H - 4}" text-anchor="middle">Favorite's predicted chance</text>
+  </svg>`;
+}
+const paramRow = p => `τ ${p.tau} · carry ${Math.round(p.carry * 100)}% · RD floor ${p.rdFloor} · margin ×${p.marginScale}`;
+function viewLab(data, L) {
+  const opts = { tz: tz(), now: Date.now() };
+  const g = backtest(data, undefined, opts), e = eloPreds(data, opts);
+  const sg = scorePreds(g), se = scorePreds(e);
+  if (sg.n < 5) return `<section class="panel"><div class="panel-h"><h2>Lab</h2></div><div class="panel-b"><p class="muted" style="margin:0">The Lab needs at least 5 rated battles to say anything useful. Play some friendlies first.</p></div></section>`;
+  const cal = calibration(g);
+  const lnc = Math.log(2);
+  const better = (a, b2) => (a < b2 ? 'up' : 'down');
+  const T = S.tune && S.tune.sig === labSig(data) ? S.tune.res : null;
+  const tuneHtml = !T ? `<p class="muted" style="margin:0 0 12px">Tries ${GRID.tau.length * GRID.carry.length * GRID.rdFloor.length * GRID.marginScale.length} combinations of the rating settings, fitting on the oldest 70% of battles and scoring on the newest 30% (which the search never sees). If the "best" settings don't also win on that held-out 30%, the gain was just noise.</p>
+      <button class="btn primary" type="button" data-act="run-tune">Run tuning</button>`
+    : T.tooFew ? `<p class="muted" style="margin:0">Needs at least 20 rated battles (you have ${T.n}).</p>`
+    : (() => {
+      const dTest = T.current.test - T.best.test;
+      const verdict = dTest > 0.01 ? `<b class="up">Worth switching.</b> The tuned settings also predict the held-out battles better (log-loss ${T.best.test.toFixed(3)} vs ${T.current.test.toFixed(3)}).`
+        : dTest > 0 ? `<b>Marginal.</b> The tuned settings are only slightly better on held-out battles (${T.best.test.toFixed(3)} vs ${T.current.test.toFixed(3)}). Probably noise at ${T.n} battles; keep the defaults for now.`
+        : `<b>Keep the defaults.</b> The tuned settings fit the training battles better but don't beat the defaults on held-out battles (${T.best.test.toFixed(3)} vs ${T.current.test.toFixed(3)}), so the gain was overfitting.`;
+      return `<p style="margin:0 0 12px">${verdict}</p>
+        <table><thead><tr><th>Settings</th><th class="r">Train (${T.cut})</th><th class="r">Held out (${T.n - T.cut})</th></tr></thead><tbody>
+          <tr><td><b>Current</b> <span class="muted">${paramRow(T.current.params)}</span></td><td class="num r">${T.current.train.toFixed(3)}</td><td class="num r">${T.current.test.toFixed(3)}</td></tr>
+          ${T.top.map((x2, i) => `<tr><td>${i === 0 ? '<b>Best fit</b> ' : ''}<span class="muted">${paramRow(x2.params)}</span></td><td class="num r">${x2.train.toFixed(3)}</td><td class="num r ${better(x2.test, T.current.test)}">${x2.test.toFixed(3)}</td></tr>`).join('')}
+        </tbody></table>
+        <p class="muted chart-note">Log-loss, lower is better. Tried ${T.tried} combinations. To apply a setting, change it in <code>public/rating.js</code> (or ask me).</p>
+        <div style="margin-top:10px"><button class="btn small" type="button" data-act="run-tune">Run again</button></div>`;
+    })();
+  return `<section class="panel lab-intro"><div class="panel-b">
+      <div class="eyebrow">Lab</div>
+      <h2 class="lab-h">Is the rating system actually any good?</h2>
+      <p class="muted" style="margin:0;max-width:72ch">Every win chance shown in the app is a prediction made before the battle. These checks replay all ${sg.n} rated battles and score those predictions against what happened, so you can see whether the model earns its numbers.</p>
+    </div></section>
+  <section class="strip" aria-label="Prediction scores">
+    <div><div class="k">Log-loss</div><div class="v num">${sg.logLoss.toFixed(3)}</div><div class="s">Coin flip: ${lnc.toFixed(3)} · Elo: <span class="${better(se.logLoss, sg.logLoss)}">${se.logLoss.toFixed(3)}</span></div></div>
+    <div><div class="k">Brier score</div><div class="v num">${sg.brier.toFixed(3)}</div><div class="s">Coin flip: 0.250 · Elo: <span class="${better(se.brier, sg.brier)}">${se.brier.toFixed(3)}</span></div></div>
+    <div><div class="k">Favorite won</div><div class="v num">${sg.accuracy == null ? '—' : fmtPct(sg.accuracy)}</div><div class="s">of ${sg.decided} decided battles · Elo ${se.accuracy == null ? '—' : fmtPct(se.accuracy)}</div></div>
+    <div><div class="k">Rated battles</div><div class="v num">${sg.n}</div><div class="s">${sg.n < 100 ? 'Small sample: read loosely' : 'Decent sample'}</div></div>
+  </section>
+  <div class="grid2">
+    <section class="panel">
+      <div class="panel-h"><h2>Calibration</h2></div>
+      <div class="panel-b">${calibrationChart(cal)}<p class="muted chart-note">Each dot is a group of battles by the favorite's predicted chance (dot size = number of battles). On the dashed line, a "70%" favorite really wins 70% of the time. Below it, the model is overconfident; above it, underconfident.</p></div>
+    </section>
+    <section class="panel">
+      <div class="panel-h"><h2>By bucket</h2></div>
+      <div class="panel-b table-wrap"><table><thead><tr><th>Favorite's chance</th><th class="r">Battles</th><th class="r">Predicted</th><th class="r">Won</th></tr></thead><tbody>
+        ${cal.map(c => `<tr><td>${fmtPct(c.lo)}–${fmtPct(c.hi)}</td><td class="num r">${c.n}</td><td class="num r">${c.n ? fmtPct(c.predicted) : '—'}</td><td class="num r ${c.n ? (Math.abs(c.actual - c.predicted) <= 0.08 ? 'up' : 'down') : ''}">${c.n ? fmtPct(c.actual) : '—'}</td></tr>`).join('')}
+      </tbody></table>
+      <p class="muted chart-note">Log-loss punishes confident wrong calls hardest; 0.693 is what always guessing 50% scores. Brier is the mean squared error of the probabilities; 0.25 for always guessing 50%. The Elo column is plain Elo (K=24, no margins, no seasons) on the same battles, as a baseline.</p></div>
+    </section>
+  </div>
+  <section class="panel">
+    <div class="panel-h"><h2>Tune the settings</h2><span class="muted" style="font-size:13px">Grid search with a held-out test set</span></div>
+    <div class="panel-b table-wrap">${tuneHtml}</div>
+  </section>`;
+}
+const labSig = data => `${Object.keys(data.matches).length}|${Object.keys(data.players).length}|${S.demo ? 'demo' : 'live'}`;
+
 /* ---------- routing + render ---------- */
 const SEEN_KEY = 'crl-entered';
 const seenIntro = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
@@ -502,7 +758,7 @@ function route() {
   // First visit in this browser (no hash) lands on the intro; after that, straight to standings.
   if (h === 'welcome' || (h === '' && !seenIntro())) return { v: 'welcome' };
   if (h.startsWith('p-')) return { v: 'player', id: h.slice(2) };
-  if (h === 'matches' || h === 'rivalries') return { v: h };
+  if (['matches', 'rivalries', 'stats', 'lab'].includes(h)) return { v: h };
   return { v: 'standings' };
 }
 function renderSync() {
@@ -639,7 +895,9 @@ function render() {
   const view = pickView(L);
   // Keep focus on the season picker across re-renders so keyboard users don't lose their place.
   const focusId = document.activeElement?.id;
-  $('#view').innerHTML = r.v === 'matches' ? viewMatches(data, L, view) : r.v === 'rivalries' ? viewRivalries(data, L, view) : r.v === 'player' ? viewPlayer(r.id, data, L, view) : viewStandings(data, L, view);
+  const views = { matches: viewMatches, rivalries: viewRivalries, stats: viewStats, lab: viewLab };
+  $('#view').innerHTML = r.v === 'player' ? viewPlayer(r.id, data, L, view) : (views[r.v] || viewStandings)(data, L, view);
+  if (r.v === 'stats') drawRecap(data, L);
   if (focusId && ['seasonSel', 'filterSel', 'predA', 'predB'].includes(focusId)) document.getElementById(focusId)?.focus();
 }
 window.addEventListener('hashchange', () => { S.matchLimit = 50; render(); window.scrollTo(0, 0); });
@@ -862,6 +1120,12 @@ function makeDemo() {
     [C('Lava Hound', 7, 'legendary'), C('Balloon', 5, 'epic'), C('Mega Minion', 3, 'rare'), C('Minions', 3), C('Arrows', 3), C('Zap', 2), C('Tombstone', 3, 'rare'), C('Skeleton Dragons', 4)],
   ];
   const deck = i => ({ cards: decks[i].map(c => ({ ...c })), tower: { id: 't', name: 'Tower Princess', icon: '' } });
+  // Towers this side lost = crowns the other side took; losers tend to leak more elixir.
+  const demoSide = (lost, lostGame) => ({
+    leaked: Math.round((rnd() * (lostGame ? 6 : 3.5)) * 100) / 100,
+    king: lost >= 3 ? null : Math.round(4824 - (rnd() < 0.35 ? rnd() * 2400 : 0)),
+    princess: Array.from({ length: Math.max(0, 2 - Math.min(lost, 2)) }, () => Math.round(3052 * (0.1 + 0.9 * rnd()))),
+  });
   const names = [['Ava', '#Q8RL2YJ', 'Hog 2.6 Cycle'], ['Ben', '#2PYQ8LV0', 'Golem Beatdown'], ['Chloe', '#9VUG0P', 'X-Bow 3.0'], ['Dev', '', 'Log Bait'], ['Eli', '#LJC22Q', 'Royal Giant Fisherman'], ['Fern', '#8CUY02', 'Lava Loon']];
   const skill = [1680, 1610, 1550, 1500, 1460, 1400];
   const now = Date.now(), dayMs = 864e5, span = 75;
@@ -885,7 +1149,8 @@ function makeDemo() {
     const pick = p => (rnd() < 0.8 ? p : Math.floor(rnd() * 6));
     matches[id] = { id, a: ids[i], b: ids[j], ca, cb, winner, playedAt: Math.min(t, now - 36e5), createdAt: t, ranked: true,
       mode: rnd() < 0.7 ? 'Classic' : MODES[1 + Math.floor(rnd() * 3)], notes: '', source: auto ? 'api' : 'manual',
-      deckA: auto ? deck(pick(i)) : null, deckB: auto ? deck(pick(j)) : null };
+      deckA: auto ? deck(pick(i)) : null, deckB: auto ? deck(pick(j)) : null,
+      stats: auto ? { a: demoSide(cb, winner === 'b'), b: demoSide(ca, winner === 'a') } : null };
   }
   return { players, matches, league: { name: 'Sample League' } };
 }
@@ -902,6 +1167,27 @@ document.addEventListener('click', async e => {
   if (act === 'demo-on') { S.demo = makeDemo(); S.season = ''; location.hash = '#standings'; render(); return; }
   if (act === 'demo-off') { S.demo = null; S.season = ''; render(); return; }
   if (act === 'more') { S.matchLimit += 50; render(); return; }
+  if (act === 'recap-dl') {
+    const blob = await recapBlob(); if (!blob) return;
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `recap-${new Date().toISOString().slice(0, 10)}.png`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000); return;
+  }
+  if (act === 'recap-copy') {
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': recapBlob() })]); toast('Recap image copied. Paste it in the group chat.'); }
+    catch { toast("Couldn't copy the image here. Use Download instead."); }
+    return;
+  }
+  if (act === 'run-tune') {
+    b.disabled = true; b.textContent = 'Running…';
+    setTimeout(() => {
+      const t0 = performance.now();
+      S.tune = { sig: labSig(D()), res: tune(D(), { tz: tz(), now: Date.now() }) };
+      S.tune.ms = performance.now() - t0;
+      render();
+    }, 30);
+    return;
+  }
   if (act === 'unlock') { unlockDialog(); return; }
   if (act === 'copy-json') {
     const out = JSON.stringify({ league: data.league, players: Object.values(data.players), matches: Object.values(data.matches) }, null, 2);

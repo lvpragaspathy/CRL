@@ -74,6 +74,8 @@ test('full flow: players, manual log, sync, dedupe, merge, tombstones, import', 
   assert.equal(merged.notes, 'gg', 'manual notes survive the merge');
   assert.equal(merged.a, lucas.id); assert.equal(merged.ca, 3); assert.equal(merged.cb, 1);
   assert.equal(merged.deckA.cards[0].id, 26000021, 'Lucas (side A) got the Hog deck');
+  assert.equal(merged.stats.a.king, 4824, 'tower HP captured, oriented with the match');
+  assert.equal(merged.stats.a.leaked, 1.5);
   assert.equal(merged.deckB.cards[0].id, 26000009);
   assert.ok(league.cards.find(c => c.id === 26000021 && c.name === 'Hog Rider' && c.icon));
   assert.equal(league.settings.timezone, 'America/Chicago');
@@ -133,4 +135,16 @@ test('static files and path traversal', async () => {
   assert.match(await idx.text(), /<title>/);
   assert.equal((await fetch(base + '/rating.js')).headers.get('content-type'), 'text/javascript; charset=utf-8');
   assert.equal((await fetch(base + '/..%2fpackage.json')).status, 404);
+});
+
+test('re-sync fills in elixir/HP stats on matches imported before stats existed', async () => {
+  const { ingestBattle } = await import('../src/poller.js');
+  const store = createMemoryStore();
+  const base = { battleKey: 'k1', a: 'p1', b: 'p2', ca: 1, cb: 0, winner: 'a', tiebreak: false, playedAt: 1, mode: 'Friendly', deckA: null, deckB: null };
+  assert.equal(await ingestBattle(store, { ...base, stats: null }, { linkWindowMs: 0 }), 'inserted');
+  const stats = { a: { leaked: 0.5, king: 4000, princess: [100] }, b: { leaked: 3, king: 4824, princess: [3052] } };
+  assert.equal(await ingestBattle(store, { ...base, stats, raw: { battleTime: 'x' } }, { linkWindowMs: 0 }), 'enriched');
+  assert.deepEqual((await store.findMatchByKey('k1')).stats, stats);
+  assert.equal(await ingestBattle(store, { ...base, stats }, { linkWindowMs: 0 }), 'exists');
+  assert.equal(await store.countRaw(), 1);
 });

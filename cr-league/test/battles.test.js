@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normTag, isValidTag, parseBattleTime, battleToMatch, prettyMode, battleKey } from '../src/battles.js';
 import { logs, TAGS, T1, T2 } from './fixtures.js';
-import { extractDeck } from '../src/battles.js';
+import { extractDeck, sideStats } from '../src/battles.js';
 
 const league = new Set([TAGS.lucas, TAGS.ava, TAGS.ben]);
 const opts = { types: ['friendly', 'clanMate'], inferTiebreak: true };
@@ -21,9 +21,9 @@ test('parseBattleTime reads the API timestamp format', () => {
 });
 
 test('same battle from both logs produces the same match', () => {
-  const fromLucas = battleToMatch(logs[TAGS.lucas][0], league, opts);
-  const fromAva = battleToMatch(logs[TAGS.ava][0], league, opts);
-  assert.deepEqual(fromLucas, fromAva);
+  const { raw: r1, ...fromLucas } = battleToMatch(logs[TAGS.lucas][0], league, opts);
+  const { raw: r2, ...fromAva } = battleToMatch(logs[TAGS.ava][0], league, opts);
+  assert.deepEqual(fromLucas, fromAva, 'everything but the raw JSON (each log is from its owner\'s side) matches');
   assert.equal(fromLucas.battleKey, battleKey(T1, TAGS.ava, TAGS.lucas));
   // sides are ordered by tag: #2PYQ8LV0 (Lucas) < #Q8RL2YJ (Ava)
   assert.equal(fromLucas.aTag, TAGS.lucas);
@@ -68,4 +68,13 @@ test('decks: missing cards -> null, foreign icon hosts dropped', () => {
   assert.equal(extractDeck({ cards: [] }), null);
   const d = extractDeck({ cards: [{ id: 1, name: 'X', iconUrls: { medium: 'https://evil.example/x.png' } }] });
   assert.equal(d.catalog[0].icon, '');
+});
+
+test('side stats: elixir leaked and remaining tower HP', () => {
+  const m = battleToMatch(logs[TAGS.lucas][0], league, opts);
+  assert.deepEqual(m.stats.a, { leaked: 1.5, king: 4824, princess: [] });
+  assert.equal(m.stats.b.king, null, "Ava's king tower fell (3 crowns), so it's missing");
+  assert.ok(m.raw && m.raw.battleTime === T1, 'raw battle kept for the archive');
+  assert.equal(sideStats({ crowns: 1 }), null);
+  assert.deepEqual(sideStats({ elixirLeaked: 2.456, kingTowerHitPoints: 100, princessTowersHitPoints: [5, 'x'] }), { leaked: 2.46, king: 100, princess: [5] });
 });
