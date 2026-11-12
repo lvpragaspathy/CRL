@@ -225,7 +225,7 @@ function viewStandings(data, C) {
   }).join('');
   const retired = Object.values(data.players).filter(p => p.archived);
   return strip + `<section class="panel">
-    <div class="panel-h"><h2>Standings</h2><span class="muted" style="font-size:13px">Click a player for their profile</span></div>
+    <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
     <div class="panel-b table-wrap" style="padding-top:6px">
       <table>
         <thead><tr><th>#</th><th>Player</th><th>Rating</th><th class="hide-sm">Tier</th><th>W-L</th><th class="r hide-sm">Win %</th><th class="r hide-md">Crowns/g</th><th class="hide-sm">Streak</th><th class="hide-md">Last 5</th><th class="hide-md">Trend</th></tr></thead>
@@ -331,9 +331,15 @@ function viewPlayer(id, data, C) {
 }
 
 /* ---------- routing + render ---------- */
+const SEEN_KEY = 'crl-entered';
+const seenIntro = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
+const markSeen = () => { try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* storage blocked */ } };
+
 function route() {
   let h = location.hash.slice(1);
   try { h = decodeURIComponent(h); } catch { /* keep raw */ }
+  // First visit in this browser (no hash) lands on the intro; after that, straight to standings.
+  if (h === 'welcome' || (h === '' && !seenIntro())) return { v: 'welcome' };
   if (h.startsWith('p-')) return { v: 'player', id: h.slice(2) };
   if (h === 'matches' || h === 'rivalries') return { v: h };
   return { v: 'standings' };
@@ -344,11 +350,11 @@ function renderSync() {
   if (S.demo || !s) { pill.hidden = true; return; }
   pill.hidden = false;
   pill.classList.remove('ok', 'err', 'busy');
-  if (!s.enabled) { txt.textContent = 'Auto-sync off'; pill.title = s.lastError || ''; return; }
+  if (!s.enabled) { txt.innerHTML = '<span class="hide-sm">Auto-sync </span>off'; pill.title = s.lastError || ''; return; }
   if (s.running) { pill.classList.add('busy'); txt.textContent = 'Syncing…'; pill.title = ''; return; }
-  if (s.lastError) { pill.classList.add('err'); txt.textContent = `Sync issue · ${ago(s.lastRunAt)}`; pill.title = s.lastError; return; }
+  if (s.lastError) { pill.classList.add('err'); txt.innerHTML = `Sync issue<span class="hide-sm"> · ${esc(ago(s.lastRunAt))}</span>`; pill.title = s.lastError; return; }
   pill.classList.add('ok');
-  txt.textContent = s.lastRunAt ? `Synced ${ago(s.lastRunAt)}` : 'Auto-sync on';
+  txt.innerHTML = s.lastRunAt ? `<span class="hide-sm">Synced </span>${esc(ago(s.lastRunAt))}` : '<span class="hide-sm">Auto-sync </span>on';
   pill.title = `Checks battle logs every ${s.intervalMinutes} min.${writable() ? ' Click to sync now.' : ''}`;
 }
 function renderBanner() {
@@ -363,8 +369,82 @@ function renderBanner() {
     b.innerHTML = `<div class="banner"><span class="grow">Editing is turned off on this server. Set LEAGUE_PASSWORD to enable it.</span></div>`;
   } else b.innerHTML = '';
 }
+/* ---------- intro ---------- */
+let introKey = null, introPlayed = false;
+function introHtml(data) {
+  const C = compute(data);
+  const ranked = ranking(data, C).filter(p => C.st[p.id].games > 0);
+  const top3 = ranked.slice(0, 3);
+  const players = Object.values(data.players).filter(p => !p.archived).length;
+  const weekAgo = Date.now() - 7 * 864e5;
+  const thisWeek = C.ms.filter(m => m.playedAt >= weekAgo).length;
+  let hot = null; for (const p of ranked) { const s = C.st[p.id]; if (s.streakT === 'W' && (!hot || s.streakN > C.st[hot.id].streakN)) hot = p; }
+  const name = data.league.name || 'Friendly Battle League';
+  // Put the last word in gold: "Friendly Battle <League>"
+  const words = name.trim().split(/\s+/);
+  const title = words.length > 1 ? `${esc(words.slice(0, -1).join(' '))} <span class="gold">${esc(words[words.length - 1])}</span>` : `<span class="gold">${esc(name)}</span>`;
+
+  const pod = (p, place) => {
+    if (!p) return `<div class="pod p${place} empty"><span class="av" aria-hidden="true">?</span><span class="nm muted">Open spot</span><span class="rt">—</span><div class="block">${place}</div></div>`;
+    const s = C.st[p.id];
+    return `<a class="pod p${place}" href="#p-${esc(p.id)}" data-act="enter-to" data-href="#p-${esc(p.id)}">
+      ${place === 1 ? CROWN.replace('class="crown"', 'class="crown-top"') : ''}
+      ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="rt num">${R(s.rating)}</span>
+      <div class="block">${place}</div></a>`;
+  };
+  const podium = top3.length
+    ? `<div class="podium" aria-label="Top three">${pod(top3[1], 2)}${pod(top3[0], 1)}${pod(top3[2], 3)}</div>`
+    : `<div class="podium"><div class="throne"><b>The throne is empty</b>${players ? 'First friendly decides who sits here.' : 'Add your crew and play a friendly to crown a champion.'}</div></div>`;
+
+  const recent = C.ms.slice(-8).reverse().map(m => {
+    const A = data.players[m.a], B = data.players[m.b];
+    const [w, l, wc, lc] = m.winner === 'b' ? [B, A, m.cb, m.ca] : [A, B, m.ca, m.cb];
+    const how = m.winner === 'draw' ? `<b>${esc(A.name)}</b> and <b>${esc(B.name)}</b> drew ${m.ca}–${m.cb}`
+      : `<b>${esc(w.name)}</b> beat <b>${esc(l.name)}</b> ${wc}–${lc}${m.ca === m.cb ? ' on the tiebreaker' : wc === 3 ? ', three crowns' : ''}`;
+    return `<span>${how}<span class="ago">${ago(m.playedAt)}</span></span>`;
+  });
+  // Duplicate the run so the marquee loops seamlessly.
+  const ticker = recent.length ? `<div class="ticker" aria-label="Recent results"><div class="ticker-track">${recent.join('')}${recent.length > 2 ? `<span aria-hidden="true" style="display:contents">${recent.join('')}</span>` : ''}</div></div>` : '<div></div>';
+
+  return `<div class="intro-inner">
+      <div class="intro-copy">
+        <div class="eyebrow">Clash Royale friendly battles</div>
+        <h1 class="intro-title">${title}</h1>
+        <p class="intro-sub">${C.ms.length ? `<b>${players}</b> players, <b>${C.ms.length}</b> battles and one crown. Every friendly counts, and the battle log keeps score.` : 'Every friendly counts. Battles between league members are tracked automatically and settled by rating.'}</p>
+        <div class="intro-actions"><button class="btn primary big" type="button" data-act="enter">Enter the league <span class="arr" aria-hidden="true">→</span></button></div>
+        <div class="intro-facts">
+          <div><span class="v num">${thisWeek}</span><span class="k">Battles this week</span></div>
+          <div><span class="v">${hot ? esc(hot.name) : '—'}</span><span class="k">${hot ? `On a W${C.st[hot.id].streakN} streak` : 'Hottest streak'}</span></div>
+          <div><span class="v num">${players}</span><span class="k">Players</span></div>
+        </div>
+      </div>
+      ${podium}
+    </div>
+    ${ticker}`;
+}
+function renderIntro() {
+  const el = $('#intro');
+  if (!S.loaded && !S.demo && !S.error) { el.innerHTML = ''; return; } // just the arena background for a beat
+  const html = introHtml(D());
+  if (html === introKey) return; // background refreshes shouldn't replay the entrance
+  introKey = html;
+  el.innerHTML = html;
+  el.classList.toggle('play', !introPlayed);
+  introPlayed = true;
+}
+function enterLeague(hash = '#standings') {
+  markSeen();
+  location.hash = hash;
+}
+
 function render() {
   const data = D();
+  const r0 = route();
+  const onIntro = r0.v === 'welcome';
+  $('#intro').hidden = !onIntro;
+  $('#app').hidden = onIntro;
+  if (onIntro) { document.title = data.league.name || 'Friendly Battle League'; renderIntro(); return; }
+  introPlayed = introKey !== null; introKey = null;
   $('#leagueName').textContent = data.league.name || 'Friendly Battle League';
   document.title = data.league.name || 'Friendly Battle League';
   const w = writable();
@@ -622,6 +702,8 @@ document.addEventListener('click', async e => {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, id = b.dataset.id, data = D();
   if (act === 'close') { closeDlg(); return; }
+  if (act === 'enter') { enterLeague(); return; }
+  if (act === 'enter-to') { e.preventDefault(); enterLeague(b.dataset.href); return; }
   if (act === 'demo-on') { S.demo = makeDemo(); location.hash = '#standings'; render(); return; }
   if (act === 'demo-off') { S.demo = null; render(); return; }
   if (act === 'unlock') { unlockDialog(); return; }

@@ -74,7 +74,9 @@ nav.tabs a:hover{color:var(--ink)}
 .banner.warn{border-color:#5a2a3a}
 .banner .grow{flex:1 1 240px}
 
-main{padding:20px 0 40px;display:grid;gap:20px}
+main{padding:20px 0 40px;display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+/* grid children default to min-width:auto, which lets a wide table stretch the whole page past the screen */
+main > *,.grid2 > *{min-width:0}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px}
 .panel-h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:16px 18px 0;flex-wrap:wrap}
 .panel-h h2{font-family:var(--display);font-weight:400;font-size:21px;margin:0;letter-spacing:.01em}
@@ -251,7 +253,20 @@ label.f input,label.f select,label.f textarea{color:var(--ink);font-weight:400;f
   .hide-md{display:none}
 }
 @media (max-width:560px){
-  .wrap{padding:0 16px}
+  .wrap{padding:0 14px}
+  .panel-h{padding:14px 12px 0}
+  .panel-b{padding:10px 12px 14px}
+  th,td{padding:9px 6px}
+  .rank{width:30px;font-size:16px}
+  .pl{gap:8px}
+  .av{width:30px;height:30px;font-size:13px}
+  .rating{font-size:19px}
+  .delta{display:block;margin-left:0}
+  .strip > div{padding:12px}
+  .strip .v{font-size:20px}
+  .top{padding-top:16px}
+  .actions .btn{padding:8px 12px}
+  nav.tabs a{padding:10px 10px}
   .hide-sm{display:none}
   .match{grid-template-columns:1fr auto 1fr;grid-template-areas:"when when acts" "a s b"}
   .match .when{grid-area:when}
@@ -263,7 +278,7 @@ label.f input,label.f select,label.f textarea{color:var(--ink);font-weight:400;f
   .row2{grid-template-columns:1fr}
   .board{grid-template-columns:1fr}
   .vs{padding:2px 0}
-  .pl .nm{max-width:120px}
+  .pl .nm{max-width:118px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
@@ -280,13 +295,93 @@ nav.tabs .spacer{flex:1}
 .auto{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#79e3ff;border:1px solid #1f5a6e;border-radius:999px;padding:1px 6px;margin-left:4px;font-stretch:80%;vertical-align:1px}
 .track{font-size:12px}
 .track.on{color:#79e3ff;border-color:#1f5a6e}
+.home{display:grid;place-items:center;border-radius:10px;flex:none}
+.home:hover .crown{transform:translateY(-2px) rotate(-6deg)}
+.home .crown{transition:transform .2s}
+
+/* Intro: the arena split into blue side and red side, with the podium as the centerpiece */
+.intro{position:relative;min-height:100vh;min-height:100dvh;display:grid;grid-template-rows:1fr auto;overflow:hidden;isolation:isolate}
+.intro::before{content:"";position:absolute;inset:0;z-index:-2;
+  background:
+    linear-gradient(112deg, rgba(74,144,255,.20) 0%, rgba(74,144,255,.06) 49.7%, rgba(255,198,58,.5) 50%, rgba(255,83,103,.06) 50.3%, rgba(255,83,103,.18) 100%),
+    var(--bg)}
+.intro::after{content:"";position:absolute;inset:0;z-index:-1;opacity:.35;
+  background-image:radial-gradient(rgba(255,255,255,.07) 1px, transparent 1px);background-size:22px 22px;
+  -webkit-mask-image:radial-gradient(ellipse at center, #000 30%, transparent 75%);mask-image:radial-gradient(ellipse at center, #000 30%, transparent 75%)}
+.intro-inner{max-width:1120px;width:100%;margin:0 auto;padding:48px 20px 24px;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+.intro-copy{display:grid;gap:18px;justify-items:start;min-width:0}
+.intro-title{font-family:var(--display);font-weight:400;font-size:clamp(46px,7.6vw,96px);line-height:.95;margin:0;letter-spacing:.005em;text-wrap:balance;overflow-wrap:anywhere;
+  text-shadow:0 4px 0 rgba(0,0,0,.35)}
+.intro-title .gold{color:var(--gold)}
+.intro-sub{margin:0;font-size:clamp(16px,1.6vw,19px);color:var(--muted);max-width:44ch}
+.intro-sub b{color:var(--ink);font-weight:700}
+.btn.big{font-size:19px;padding:15px 24px;border-radius:14px;box-shadow:0 5px 0 #a87300, 0 16px 40px rgba(255,198,58,.22)}
+.btn.big:active{box-shadow:0 2px 0 #a87300}
+.btn.big .arr{transition:transform .2s}
+.btn.big:hover .arr{transform:translateX(4px)}
+.intro-actions{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.intro-facts{display:flex;gap:28px;flex-wrap:wrap;margin-top:6px}
+.intro-facts div{display:grid;gap:2px}
+.intro-facts .v{font-family:var(--display);font-size:28px;line-height:1}
+.intro-facts .k{font-stretch:75%;text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:700;color:var(--muted)}
+
+.podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:10px;min-height:340px}
+.pod{display:grid;justify-items:center;gap:8px;text-decoration:none;min-width:0}
+.pod .av{width:64px;height:64px;font-size:26px;box-shadow:inset 0 -4px 0 rgba(0,0,0,.25),0 0 0 4px rgba(11,18,34,.8)}
+.pod.p1 .av{width:84px;height:84px;font-size:34px}
+.pod .nm{font-weight:800;font-size:16px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pod .rt{font-family:var(--display);font-size:20px;color:var(--muted);line-height:1}
+.pod.p1 .rt{color:var(--gold);font-size:24px}
+.pod .block{width:100%;border-radius:12px 12px 4px 4px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-top-width:4px;display:grid;place-items:start center;padding-top:10px;font-family:var(--display);font-size:34px;color:rgba(255,255,255,.18);transform-origin:bottom}
+.pod.p1 .block{height:150px;border-top-color:var(--gold);color:rgba(255,198,58,.45)}
+.pod.p2 .block{height:108px;border-top-color:#c9d2e8}
+.pod.p3 .block{height:78px;border-top-color:#d6966b}
+.pod .crown-top{width:52px;height:44px;fill:var(--gold);filter:drop-shadow(0 3px 0 #9a6a00);margin-bottom:-4px}
+.pod:hover .nm{text-decoration:underline}
+.pod.empty .av{background:var(--panel-2);color:var(--muted)}
+.throne{grid-column:1/-1;text-align:center;color:var(--muted);padding:24px;border:1px dashed var(--line);border-radius:14px;align-self:center}
+.throne b{display:block;font-family:var(--display);font-weight:400;font-size:24px;color:var(--ink);margin-bottom:4px}
+
+.ticker{border-top:1px solid var(--line);background:rgba(11,18,34,.6);overflow:hidden;white-space:nowrap;padding:12px 0;font-size:14px}
+.ticker-track{display:inline-flex;gap:40px;padding-left:40px;animation:tick 40s linear infinite}
+.ticker:hover .ticker-track{animation-play-state:paused}
+.ticker span{color:var(--muted)}
+.ticker b{color:var(--ink)}
+.ticker .ago{color:var(--muted);opacity:.7;margin-left:6px;font-size:12.5px}
+@keyframes tick{to{transform:translateX(-50%)}}
+
+/* one-time entrance, only on first paint of the intro */
+.intro.play .intro-copy > *{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+.intro.play .intro-copy > *:nth-child(2){animation-delay:.06s}
+.intro.play .intro-copy > *:nth-child(3){animation-delay:.12s}
+.intro.play .intro-copy > *:nth-child(4){animation-delay:.18s}
+.intro.play .intro-copy > *:nth-child(5){animation-delay:.24s}
+.intro.play .pod .block{animation:grow .7s cubic-bezier(.2,.8,.2,1) both}
+.intro.play .pod.p2 .block{animation-delay:.15s}
+.intro.play .pod.p3 .block{animation-delay:.25s}
+.intro.play .pod .av,.intro.play .pod .nm,.intro.play .pod .rt{animation:rise .5s ease-out both;animation-delay:.45s}
+.intro.play .pod .crown-top{animation:drop .7s cubic-bezier(.3,1.6,.5,1) both;animation-delay:.8s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes grow{from{transform:scaleY(0)}}
+@keyframes drop{from{opacity:0;transform:translateY(-60px) rotate(-12deg)}}
+
+@media (max-width:860px){
+  .intro-inner{grid-template-columns:1fr;padding-top:36px;gap:28px}
+  .podium{min-height:0}
+  .pod .av{width:52px;height:52px;font-size:21px}
+  .pod.p1 .av{width:68px;height:68px;font-size:28px}
+  .pod.p1 .block{height:110px} .pod.p2 .block{height:80px} .pod.p3 .block{height:58px}
+  .intro::before{background:linear-gradient(160deg, rgba(74,144,255,.2) 0%, rgba(74,144,255,.05) 49.8%, rgba(255,198,58,.45) 50%, rgba(255,83,103,.05) 50.2%, rgba(255,83,103,.18) 100%), var(--bg)}
+}
+@media (prefers-reduced-motion:reduce){.ticker-track{animation:none}.ticker{overflow-x:auto}}
 </style>
 </head>
 <body>
-<div class="wrap">
+<section class="intro" id="intro" hidden aria-label="League intro"></section>
+<div class="wrap" id="app">
   <header class="top">
     <div class="brand">
-      <svg class="crown" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/><rect x="4" y="17" width="16" height="2.5" rx="1"/></svg>
+      <a class="home" href="#welcome" aria-label="League intro" title="League intro"><svg class="crown" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/><rect x="4" y="17" width="16" height="2.5" rx="1"/></svg></a>
       <div style="min-width:0">
         <div class="eyebrow">Clash Royale friendly battles</div>
         <button class="rename" id="leagueBtn" type="button" data-act="rename-league" title="Rename league"><h1 id="leagueName">Friendly Battle League</h1></button>
