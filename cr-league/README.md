@@ -97,6 +97,8 @@ Ratings are never stored. The UI replays every match in time order (`public/rati
 
 **Glicko-2** (Glickman 2012). Each player has a rating *r* (starts 1500), a rating deviation *RD* (starts 350: how unsure the rating is) and a volatility *σ*. Every game is its own rating period, and each idle day adds a period's worth of uncertainty before the next game, so RD grows while someone is away. The implementation is checked against the worked example in Glickman's paper (`test/rating.test.js`).
 
+**Crown margin.** Plain Glicko-2 only sees win/draw/loss, so the rating move (μ' − μ) is multiplied by `1 + bonus × 2(1 − p)`, where bonus is 0 / 0.15 / 0.30 for a 1/2/3-crown margin and p is the winner's pre-game win chance. Even game: ×1.00 / ×1.15 / ×1.30. The surprise weighting stops favorites from snowballing by stomping weaker players (the same autocorrelation problem FiveThirtyEight's Elo corrects for). RD and volatility are untouched, so a big margin moves ratings further without making the system more certain. Tiebreaker wins and draws use ×1.
+
 **Win probability** for A vs B: `1 / (1 + exp(-g(√(φA² + φB²)) · (μA − μB)))`, where `g(φ) = 1/√(1 + 3φ²/π²)`. Two uncertain ratings pull the odds toward 50%. A win the model gave under 35% is marked as an upset.
 
 **Seasons** are calendar months in `LEAGUE_TIMEZONE`. At each rollover every rating moves halfway back to 1500 and RD is raised to at least 150, so the first few games of a month are placements. The champion is the highest rating at month's end with 5+ battles. The "All time" view runs the same model with no resets.

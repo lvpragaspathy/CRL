@@ -17,6 +17,11 @@ export const PROVISIONAL_RD = 110;    // above this a player is still in placeme
 export const SEASON_CARRY = 0.5;      // new season: ratings move halfway back to 1500...
 export const SEASON_RD_FLOOR = 150;   // ...and RD goes up to at least this (a few placement games)
 export const MIN_CHAMP_GAMES = 5;     // games in a season to be eligible for champion
+// Crown margin. Plain Glicko-2 only sees win/draw/loss, so the rating move (not RD or volatility) is
+// scaled by the margin. The bonus is weighted by how surprising the win was, so a heavy favorite
+// three-crowning a much weaker player doesn't snowball (same idea as FiveThirtyEight's Elo
+// autocorrelation fix).
+export const MARGIN_BONUS = { 1: 0, 2: 0.15, 3: 0.3 };
 const DAY = 864e5;
 
 /* ---------- Glicko-2 core ---------- */
@@ -42,8 +47,23 @@ function newVolatility(sigma, phi, v, delta, tau) {
   return Math.exp(A / 2);
 }
 
-/** One rating period. p = {r, rd, sigma}; games = [{r, rd, s}] with s = 1 win, 0.5 draw, 0 loss. */
-export function glicko2Update(p, games, tau = TAU) {
+/**
+ * Margin multiplier for a decided game. crownDiff = winner's crowns minus loser's (0 for a tiebreaker win),
+ * pWin = the winner's chance before the game.
+ *   even matchup (50%):  1-crown x1.00, 2-crown x1.15, 3-crown x1.30
+ *   underdog win (20%):  3-crown x1.48     heavy favorite (90%): 3-crown x1.06
+ */
+export function marginMult(crownDiff, pWin) {
+  const base = MARGIN_BONUS[Math.min(3, Math.max(1, crownDiff))] || 0;
+  const surprise = 2 * (1 - Math.min(1, Math.max(0, pWin)));   // 0..2, 1 for an even game
+  return 1 + base * surprise;
+}
+
+/**
+ * One rating period. p = {r, rd, sigma}; games = [{r, rd, s}] with s = 1 win, 0.5 draw, 0 loss.
+ * `mult` scales only the rating move (1 = standard Glicko-2).
+ */
+export function glicko2Update(p, games, tau = TAU, mult = 1) {
   const mu = (p.r - START_R) / SCALE, phi = p.rd / SCALE;
   if (!games.length) return { r: p.r, rd: Math.min(START_RD, Math.sqrt(phi * phi + p.sigma * p.sigma) * SCALE), sigma: p.sigma };
   let vInv = 0, sum = 0;
@@ -57,7 +77,7 @@ export function glicko2Update(p, games, tau = TAU) {
   const sigma = newVolatility(p.sigma, phi, v, v * sum, tau);
   const phiStar = Math.sqrt(phi * phi + sigma * sigma);
   const phiNew = 1 / Math.sqrt(1 / (phiStar * phiStar) + 1 / v);
-  const muNew = mu + phiNew * phiNew * sum;
+  const muNew = mu + phiNew * phiNew * sum * mult;
   return { r: muNew * SCALE + START_R, rd: Math.min(START_RD, phiNew * SCALE), sigma };
 }
 
@@ -159,11 +179,13 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
       const a0 = inflate(A, A.lastAt == null ? 0 : Math.floor((m.playedAt - A.lastAt) / DAY));
       const b0 = inflate(B, B.lastAt == null ? 0 : Math.floor((m.playedAt - B.lastAt) / DAY));
       const pA = winProb(a0, b0);
-      let dA = null, dB = null;
+      let dA = null, dB = null, mult = null;
       if (m.ranked) {
         const sa = m.winner === 'a' ? 1 : m.winner === 'b' ? 0 : 0.5;
-        const a1 = glicko2Update(a0, [{ r: b0.r, rd: b0.rd, s: sa }]);
-        const b1 = glicko2Update(b0, [{ r: a0.r, rd: a0.rd, s: 1 - sa }]);
+        mult = m.winner === 'draw' ? 1
+          : marginMult(m.winner === 'a' ? m.ca - m.cb : m.cb - m.ca, m.winner === 'a' ? pA : 1 - pA);
+        const a1 = glicko2Update(a0, [{ r: b0.r, rd: b0.rd, s: sa }], TAU, mult);
+        const b1 = glicko2Update(b0, [{ r: a0.r, rd: a0.rd, s: 1 - sa }], TAU, mult);
         dA = a1.r - a0.r; dB = b1.r - b0.r;
         Object.assign(A, a1, { lastAt: m.playedAt, played: true });
         Object.assign(B, b1, { lastAt: m.playedAt, played: true });
@@ -176,7 +198,7 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
       }
       tally(st[m.a], m.ca, m.cb, m.winner === 'a' ? 'W' : m.winner === 'b' ? 'L' : 'D', m.b, dA);
       tally(st[m.b], m.cb, m.ca, m.winner === 'b' ? 'W' : m.winner === 'a' ? 'L' : 'D', m.a, dB);
-      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, pA };
+      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, pA, mult };
       view.ms.push(m);
     }
     views[key] = view;

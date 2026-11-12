@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  glicko2Update, winProb, inflate, computeLeague, seasonKey, seasonStart, nextSeasonKey, tier, cardStats,
+  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, tier, cardStats,
   START_R, SEASON_CARRY, SEASON_RD_FLOOR, MIN_CHAMP_GAMES,
 } from '../public/rating.js';
 
@@ -90,4 +90,22 @@ test('card stats: usage, deck records, matchups', () => {
   assert.equal(cs.decks[0].w, 2); assert.equal(cs.decks[0].l, 1);
   assert.equal(cs.cards.find(c => c.card.name === 'Hog Rider').n, 3);
   near(cs.vs.find(c => c.card.name === 'Golem').rate, 2 / 3, 1e-9, 'win rate vs Golem');
+});
+
+test('crown margin: bigger wins move ratings more, weighted by surprise', () => {
+  assert.equal(marginMult(1, 0.5), 1);
+  near(marginMult(2, 0.5), 1.15, 1e-12, 'even 2-crown');
+  near(marginMult(3, 0.5), 1.3, 1e-12, 'even 3-crown');
+  assert.ok(marginMult(3, 0.2) > marginMult(3, 0.5), 'underdog stomp counts more');
+  assert.ok(marginMult(3, 0.9) < marginMult(3, 0.5) && marginMult(3, 0.9) > 1, 'favorite stomp counts a little');
+  assert.equal(marginMult(0, 0.5), 1, 'tiebreaker win has no margin bonus');
+
+  // Same matchup, 3-0 vs 1-0: bigger move, identical RD (margin doesn't make the system more certain)
+  const P = { x: { id: 'x' }, y: { id: 'y' } };
+  const t = Date.UTC(2026, 10, 5);
+  const run = (ca, cb) => computeLeague({ players: P, matches: { m: { id: 'm', a: 'x', b: 'y', ca, cb, winner: ca > cb ? 'a' : 'b', playedAt: t, createdAt: 1, ranked: true } } }, { tz: 'UTC', now: t + 1000 }).byKey['2026-11'];
+  const one = run(1, 0), three = run(3, 0);
+  near(three.delta.m.a, one.delta.m.a * 1.3, 1e-9, '3-crown is 1.3x a 1-crown between equals');
+  near(three.delta.m.b, one.delta.m.b * 1.3, 1e-9, 'loser drops 1.3x too');
+  near(three.st.x.rd, one.st.x.rd, 1e-9, 'RD unaffected');
 });
