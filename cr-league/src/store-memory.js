@@ -6,6 +6,7 @@ export function createMemoryStore() {
   const players = new Map();
   const matches = new Map();
   const cards = new Map();
+  const raw = new Map();
 
   return {
     kind: 'memory',
@@ -51,6 +52,8 @@ export function createMemoryStore() {
         cards.set(c.id, { ...c, icon: c.icon || prev?.icon || '', iconEvo: c.iconEvo || prev?.iconEvo || '' });
       }
     },
+    async saveRaw(key, data, playedAt) { if (!raw.has(key)) raw.set(key, { data: clone(data), playedAt }); },
+    async countRaw() { return raw.size; },
     async listCards() { return [...cards.values()].map(clone); },
     async findMatchByKey(key) { return clone([...matches.values()].find(m => m.battleKey === key) || null); },
     async findLinkCandidates(a, b, t, windowMs) {

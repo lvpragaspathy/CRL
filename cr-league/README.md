@@ -6,7 +6,8 @@ Every few minutes the server pulls each tagged player's battle log, keeps the 1v
 
 ```
 public/          the UI (plain HTML + ES modules, no build step)
-  rating.js      Glicko-2 + seasons + card stats (shared by the UI and the tests)
+  rating.js      Glicko-2 + seasons + card stats + backtesting (shared by the UI and the tests)
+  stats.js       Stats/Lab analytics: clutch, elixir leaked, tilt, meta, records, recap, calibration, tuning
 src/
   server.js      HTTP server + REST API + static files
   poller.js      battle log polling, dedupe, merge with manual entries
@@ -104,3 +105,24 @@ Ratings are never stored. The UI replays every match in time order (`public/rati
 **Seasons** are calendar months in `LEAGUE_TIMEZONE`. At each rollover every rating moves halfway back to 1500 and RD is raised to at least 150, so the first few games of a month are placements. The champion is the highest rating at month's end with 5+ battles. The "All time" view runs the same model with no resets.
 
 **Decks** come from the battle log for auto-imported matches, stored compactly on each match (`{cards: [{id, evo}], tower}`) with names, elixir and icons in a separate `cards` table. Battles imported before deck tracking existed get their decks filled in while they're still in someone's last 25 battles.
+
+## Stats tab
+
+- **Weekly recap:** a 1080×1350 PNG (drawn on a canvas) of the last 7 days to download or copy into a group chat.
+- **Season race:** everyone's rating as a step chart through the selected season.
+- **Record book:** longest win streak, biggest upset, biggest single-game gain and best day (placement games excluded), most battles in a day, most 3-crowns in a season, biggest HP blowout, most elixir leaked.
+- **Clutch:** record in close games (draws, tiebreakers, and 1-crown games won by ≤ 1,500 HP) and average HP edge.
+- **Elixir leaked:** per game, split by wins and losses.
+- **League meta:** archetypes (named by win conditions) and the most-played cards with win rates.
+- **Tilt check:** win rate after a win vs after a loss, and in the first game of a session vs later games (new session after a 45+ minute break).
+- **When we play:** a day × hour heatmap in the league time zone.
+
+Tower HP and elixir leaked come from the battle log (`kingTowerHitPoints`, `princessTowersHitPoints`, `elixirLeaked`). Destroyed towers are missing from the log, so a side the opponent three-crowned counts as 0 HP. Every imported battle's full JSON is also kept in `battles_raw`, so future stats can be calculated back to today.
+
+## Lab tab
+
+Checks the rating system against what actually happened, using the win chance it gave before each battle:
+
+- **Log-loss and Brier score** vs a coin flip and vs plain Elo on the same battles.
+- **Calibration:** battles grouped by the favorite's predicted chance (50–60%, 60–70%, …) and how often favorites actually won.
+- **Tuning:** a grid search over τ, season carryover, the RD floor and margin strength (240 combinations). It fits on the oldest 70% of battles and reports log-loss on the newest 30%, so overfitting shows up as no gain on the held-out battles. Apply a winner by editing the constants in `public/rating.js`.

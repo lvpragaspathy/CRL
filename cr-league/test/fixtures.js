@@ -10,8 +10,11 @@ export const GOLEM = [card(26000009, 'Golem', 8), card(26000048, 'Night Witch', 
   card(28000008, 'Zap', 2), card(26000017, 'Baby Dragon', 4), card(28000007, 'Tornado', 3), card(28000016, 'Lightning', 6)];
 const TOWER = [{ id: 159000000, name: 'Tower Princess', rarity: 'common', iconUrls: { medium: ASSET + 'TowerPrincess.png' } }];
 
-const side = (tag, name, crowns, king = 4824, princess = [3052, 3052], cards = []) =>
-  ({ tag, name, crowns, kingTowerHitPoints: king, princessTowersHitPoints: princess, cards, supportCards: cards.length ? TOWER : [] });
+const side = (tag, name, crowns, king = 4824, princess = [3052, 3052], cards = [], elixirLeaked = 1.5) => {
+  const s = { tag, name, crowns, princessTowersHitPoints: princess, cards, supportCards: cards.length ? TOWER : [], elixirLeaked };
+  if (king) s.kingTowerHitPoints = king; // a destroyed king tower is missing from the log
+  return s;
+};
 
 export const T1 = '20261112T201500.000Z'; // Lucas 3-1 Ava (friendly)
 export const T2 = '20261112T203000.000Z'; // Lucas 1-1 Ben, Lucas wins tiebreaker on tower HP

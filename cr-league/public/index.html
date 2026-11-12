@@ -462,6 +462,48 @@ h3.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
   .pr{font-size:18px}
   .seasonbar{padding:10px 12px}
 }
+
+/* ---------- Stats + Lab ---------- */
+.stats{grid-template-columns:repeat(9,minmax(0,1fr))}
+.score-note.close{color:#79e3ff}
+.hpline{font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chart .rline{fill:none;stroke-width:2.4;stroke-linejoin:round;opacity:.95}
+.chart .rlab{font-size:12px;font-weight:700}
+.records{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.record{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:6px;align-content:start;min-width:0}
+.record.shame{border-style:dashed}
+.record .rk{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:11px;font-weight:700;color:var(--muted)}
+.record .rv{font-family:var(--display);font-size:24px;color:var(--gold);line-height:1.1}
+.record.shame .rv{color:var(--loss)}
+.record .rw a{display:inline-flex;align-items:center;gap:8px;text-decoration:none}
+.record .rw .av{width:26px;height:26px;font-size:12px}
+.record .rs{font-size:12.5px}
+.leakbar{display:inline-block;width:50px;height:6px;border-radius:3px;background:var(--panel-2);margin-right:8px;vertical-align:middle;overflow:hidden}
+.leakbar i{display:block;height:100%;background:#c36bff;border-radius:3px}
+.heat{display:grid;grid-template-columns:34px repeat(24,minmax(0,1fr));gap:3px;align-items:center}
+.heat i{aspect-ratio:1;max-height:30px;border-radius:3px;background:rgba(255,198,58,var(--a));outline:1px solid rgba(255,255,255,.04)}
+.heat .hd{font-size:11px;color:var(--muted);font-weight:650}
+.heat .hh{font-size:10px;color:var(--muted);white-space:nowrap;overflow:visible}
+.chip.tiltchip{color:var(--loss);border-color:#5a2a3a;margin-left:8px}
+.chip.calmchip{color:var(--win);border-color:#1d5a3f;margin-left:8px}
+.recap{display:grid;grid-template-columns:minmax(0,300px) 1fr;gap:20px;align-items:center}
+.recap canvas{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block}
+.recap-side{display:grid;gap:14px;justify-items:start;max-width:46ch}
+.lab-h{font-family:var(--display);font-weight:400;font-size:28px;margin:4px 0 8px;text-wrap:balance}
+.chart.cal{max-width:420px}
+.chart .diag{stroke:var(--muted);stroke-dasharray:5 5}
+.chart .calpt{fill:var(--gold);stroke:var(--bg);stroke-width:2;opacity:.9}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;background:var(--panel-2);padding:1px 5px;border-radius:5px}
+@media (max-width:860px){
+  .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .recap{grid-template-columns:1fr}
+  .recap canvas{max-width:320px}
+}
+@media (max-width:560px){
+  .heat{grid-template-columns:28px repeat(24,minmax(0,1fr));gap:2px}
+  .heat .hh{font-size:8.5px}
+  nav.tabs a{padding:10px 8px}
+}
 </style>
 </head>
 <body>
@@ -485,6 +527,8 @@ h3.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
     <a href="#standings" data-tab="standings">Standings</a>
     <a href="#matches" data-tab="matches">Match log</a>
     <a href="#rivalries" data-tab="rivalries">Rivalries</a>
+    <a href="#stats" data-tab="stats">Stats</a>
+    <a href="#lab" data-tab="lab">Lab</a>
     <span class="spacer"></span>
     <button class="syncpill" type="button" id="syncPill" data-act="sync" hidden><span class="dot"></span><span id="syncText">Auto-sync</span></button>
   </nav>

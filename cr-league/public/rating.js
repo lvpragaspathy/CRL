@@ -22,6 +22,9 @@ export const MIN_CHAMP_GAMES = 5;     // games in a season to be eligible for ch
 // three-crowning a much weaker player doesn't snowball (same idea as FiveThirtyEight's Elo
 // autocorrelation fix).
 export const MARGIN_BONUS = { 1: 0, 2: 0.15, 3: 0.3 };
+
+/** The tunable knobs, gathered so the Lab can backtest alternatives. */
+export const DEFAULT_PARAMS = Object.freeze({ tau: TAU, carry: SEASON_CARRY, rdFloor: SEASON_RD_FLOOR, marginScale: 1 });
 const DAY = 864e5;
 
 /* ---------- Glicko-2 core ---------- */
@@ -53,10 +56,10 @@ function newVolatility(sigma, phi, v, delta, tau) {
  *   even matchup (50%):  1-crown x1.00, 2-crown x1.15, 3-crown x1.30
  *   underdog win (20%):  3-crown x1.48     heavy favorite (90%): 3-crown x1.06
  */
-export function marginMult(crownDiff, pWin) {
+export function marginMult(crownDiff, pWin, scale = 1) {
   const base = MARGIN_BONUS[Math.min(3, Math.max(1, crownDiff))] || 0;
   const surprise = 2 * (1 - Math.min(1, Math.max(0, pWin)));   // 0..2, 1 for an even game
-  return 1 + base * surprise;
+  return 1 + base * scale * surprise;
 }
 
 /**
@@ -156,7 +159,7 @@ function tally(s, cf, ca, r, opp, d) {
  * Replays matches. With `seasons`, ratings soft-reset at each month boundary and stats are kept per
  * season; without, one continuous all-time view.
  */
-function simulate(players, ms, { keys, keyOf, resets, now }) {
+function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARAMS }) {
   const state = {};
   for (const id in players) state[id] = { r: START_R, rd: START_RD, sigma: START_SIGMA, lastAt: null, played: false };
   const views = {}, timeline = {};
@@ -166,8 +169,8 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
     if (ki > 0 && resets) {
       for (const id in state) {
         const s = state[id]; if (!s.played) continue;
-        s.r = START_R + (s.r - START_R) * SEASON_CARRY;
-        s.rd = Math.max(s.rd, SEASON_RD_FLOOR);
+        s.r = START_R + (s.r - START_R) * params.carry;
+        s.rd = Math.max(s.rd, params.rdFloor);
         timeline[id].push({ t: null, r: s.r, rd: s.rd, season: key, reset: true });
       }
     }
@@ -183,9 +186,9 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
       if (m.ranked) {
         const sa = m.winner === 'a' ? 1 : m.winner === 'b' ? 0 : 0.5;
         mult = m.winner === 'draw' ? 1
-          : marginMult(m.winner === 'a' ? m.ca - m.cb : m.cb - m.ca, m.winner === 'a' ? pA : 1 - pA);
-        const a1 = glicko2Update(a0, [{ r: b0.r, rd: b0.rd, s: sa }], TAU, mult);
-        const b1 = glicko2Update(b0, [{ r: a0.r, rd: a0.rd, s: 1 - sa }], TAU, mult);
+          : marginMult(m.winner === 'a' ? m.ca - m.cb : m.cb - m.ca, m.winner === 'a' ? pA : 1 - pA, params.marginScale);
+        const a1 = glicko2Update(a0, [{ r: b0.r, rd: b0.rd, s: sa }], params.tau, mult);
+        const b1 = glicko2Update(b0, [{ r: a0.r, rd: a0.rd, s: 1 - sa }], params.tau, mult);
         dA = a1.r - a0.r; dB = b1.r - b0.r;
         Object.assign(A, a1, { lastAt: m.playedAt, played: true });
         Object.assign(B, b1, { lastAt: m.playedAt, played: true });
@@ -198,7 +201,7 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
       }
       tally(st[m.a], m.ca, m.cb, m.winner === 'a' ? 'W' : m.winner === 'b' ? 'L' : 'D', m.b, dA);
       tally(st[m.b], m.cb, m.ca, m.winner === 'b' ? 'W' : m.winner === 'a' ? 'L' : 'D', m.a, dB);
-      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, pA, mult };
+      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, preRdA: a0.rd, preRdB: b0.rd, pA, mult };
       view.ms.push(m);
     }
     views[key] = view;
@@ -218,18 +221,38 @@ function simulate(players, ms, { keys, keyOf, resets, now }) {
  * Everything the UI needs. data = {players, matches}; opts = {tz, now}.
  * Returns season views (soft resets), an all-time view, champions and live ratings for predictions.
  */
-export function computeLeague(data, { tz = 'America/Chicago', now = Date.now() } = {}) {
+function prepare(data, tz, now) {
   const players = data.players;
   const ms = Object.values(data.matches).filter(m => players[m.a] && players[m.b] && m.a !== m.b).sort(byTime);
   const nowKey = seasonKey(now, tz);
   const firstKey = ms.length ? seasonKey(ms[0].playedAt, tz) : nowKey;
   const lastKey = ms.length ? [nowKey, seasonKey(ms[ms.length - 1].playedAt, tz)].sort().pop() : nowKey;
   const keys = seasonKeysBetween(firstKey < nowKey ? firstKey : nowKey, lastKey);
-  const keyCache = new Map();
-  const keyOf = m => { if (!keyCache.has(m.id)) keyCache.set(m.id, seasonKey(m.playedAt, tz)); return keyCache.get(m.id); };
+  const keyMap = new Map(ms.map(m => [m.id, seasonKey(m.playedAt, tz)]));
+  return { players, ms, nowKey, keys, keyOf: m => keyMap.get(m.id) };
+}
 
-  const season = simulate(players, ms, { keys, keyOf, resets: true, now });
-  const all = simulate(players, ms, { keys: ['all'], keyOf: () => 'all', resets: false, now }).views.all;
+/**
+ * Pre-game predictions for every rated game, in order, under a given set of params:
+ * [{ p: chance side A wins, s: actual score for A (1 / 0.5 / 0), t }]
+ */
+export function backtest(data, params = DEFAULT_PARAMS, { tz = 'America/Chicago', now = Date.now(), prepared } = {}) {
+  const P = prepared || prepare(data, tz, now);
+  const { views } = simulate(P.players, P.ms, { keys: P.keys, keyOf: P.keyOf, resets: true, now, params });
+  const out = [];
+  for (const m of P.ms) {
+    if (!m.ranked) continue;
+    const d = views[P.keyOf(m)].delta[m.id];
+    out.push({ p: d.pA, s: m.winner === 'a' ? 1 : m.winner === 'b' ? 0 : 0.5, t: m.playedAt });
+  }
+  return out;
+}
+export const prepareLeague = (data, { tz = 'America/Chicago', now = Date.now() } = {}) => prepare(data, tz, now);
+
+export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), params = DEFAULT_PARAMS } = {}) {
+  const { players, ms, nowKey, keys, keyOf } = prepare(data, tz, now);
+  const season = simulate(players, ms, { keys, keyOf, resets: true, now, params });
+  const all = simulate(players, ms, { keys: ['all'], keyOf: () => 'all', resets: false, now, params }).views.all;
 
   const champions = [], champCount = {};
   for (const key of keys) {

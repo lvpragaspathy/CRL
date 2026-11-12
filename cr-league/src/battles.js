@@ -63,6 +63,7 @@ export function battleToMatch(battle, leagueTags, { types, inferTiebreak = true 
     if (ha != null && hb != null && ha !== hb) { winner = ha > hb ? 'a' : 'b'; tiebreak = true; }
   }
   const da = extractDeck(A), db = extractDeck(B);
+  const sa = sideStats(A), sb = sideStats(B);
   return {
     battleKey: battleKey(battle.battleTime, aTag, bTag),
     aTag, bTag, ca, cb, winner, tiebreak, playedAt,
@@ -70,7 +71,22 @@ export function battleToMatch(battle, leagueTags, { types, inferTiebreak = true 
     deckA: da?.deck || null,
     deckB: db?.deck || null,
     cards: [...(da?.catalog || []), ...(db?.catalog || [])],
+    stats: sa || sb ? { a: sa || emptySide(), b: sb || emptySide() } : null,
+    raw: battle,
   };
+}
+
+/* ---------- per-side numbers: elixir leaked and tower HP left ----------
+ * A destroyed tower is simply missing from the log, so a side with no HP fields at all may have
+ * been three-crowned; the client works that out from the crowns. */
+const emptySide = () => ({ leaked: null, king: null, princess: [] });
+export function sideStats(side) {
+  if (!side) return null;
+  const leaked = Number.isFinite(side.elixirLeaked) ? Math.round(side.elixirLeaked * 100) / 100 : null;
+  const king = Number.isFinite(side.kingTowerHitPoints) ? side.kingTowerHitPoints : null;
+  const princess = Array.isArray(side.princessTowersHitPoints) ? side.princessTowersHitPoints.filter(Number.isFinite) : [];
+  if (leaked == null && king == null && !princess.length && !('princessTowersHitPoints' in side)) return null;
+  return { leaked, king, princess };
 }
 
 /* ---------- decks ----------
