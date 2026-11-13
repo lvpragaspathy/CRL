@@ -950,13 +950,23 @@ const labSig = data => `${Object.keys(data.matches).length}|${Object.keys(data.p
 /* ---------- routing + render ---------- */
 const SEEN_KEY = 'crl-entered';
 const seenIntro = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
-const markSeen = () => { try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* storage blocked */ } };
+// The welcome page comes back once per season, so the new month opens on last month's champion.
+const SEASON_SEEN_KEY = 'crl-season';
+const getSeenSeason = () => { try { return localStorage.getItem(SEASON_SEEN_KEY) || ''; } catch { return ''; } };
+const setSeenSeason = k => { try { localStorage.setItem(SEASON_SEEN_KEY, k); } catch { /* storage blocked */ } };
+const nowSeason = () => seasonKey(Date.now(), tz());
+const markSeen = () => { try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* storage blocked */ } setSeenSeason(nowSeason()); };
 
 function route() {
   let h = location.hash.slice(1);
   try { h = decodeURIComponent(h); } catch { /* keep raw */ }
   // First visit in this browser (no hash) lands on the intro; after that, straight to standings.
-  if (h === 'welcome' || (h === '' && !seenIntro())) return { v: 'welcome' };
+  if (h === 'welcome') return { v: 'welcome', reason: 'manual' };
+  if (h === '') {
+    if (!seenIntro()) return { v: 'welcome', reason: 'first' };
+    const seen = getSeenSeason();
+    if (seen && seen !== nowSeason()) return { v: 'welcome', reason: 'season' };
+  }
   if (h.startsWith('p-')) return { v: 'player', id: h.slice(2) };
   if (['matches', 'rivalries', 'stats', 'lab'].includes(h)) return { v: h };
   if (h.startsWith('r-')) return { v: 'rivalries', pair: h.slice(2) };
@@ -992,14 +1002,20 @@ function renderBanner() {
 }
 /* ---------- intro ---------- */
 let introKey = null, introPlayed = false;
-function introHtml(data, L) {
+function introHtml(data, L, reason) {
   // Podium shows the current season; on the 1st of a month (nobody's played yet) it shows last month's final table.
   let view = L.byKey[L.currentKey], caption = `${seasonLabel(L.currentKey)} standings`;
-  if (!view.ms.length && L.seasons[1]) { view = L.byKey[L.seasons[1]]; caption = `${seasonLabel(L.seasons[1])} final`; }
+  const prevKey = L.seasons[1];
+  // New season (or nobody has played yet this month): show last month's final table.
+  if (prevKey && (reason === 'season' || !view.ms.length)) { view = L.byKey[prevKey]; caption = `${seasonLabel(prevKey)} final`; }
+  const champ = reason === 'season' && prevKey ? L.champions.find(c => c.key === prevKey) : null;
+  const champP = champ && data.players[champ.id];
   const ranked = ranking(data, view).filter(p => view.st[p.id].games > 0);
   const top3 = ranked.slice(0, 3);
   const players = Object.values(data.players).filter(p => !p.archived).length;
-  let hot = null; for (const p of ranked) { const s = view.st[p.id]; if (s.streakT === 'W' && (!hot || s.streakN > view.st[hot.id].streakN)) hot = p; }
+  // Streaks are about right now, so they come from the current season even when the podium shows last month.
+  const cur = L.byKey[L.currentKey];
+  let hot = null; for (const p of ranking(data, cur)) { const s = cur.st[p.id]; if (s.games && s.streakT === 'W' && (!hot || s.streakN > cur.st[hot.id].streakN)) hot = p; }
   const lastChamp = L.champions[0] && data.players[L.champions[0].id];
   const name = data.league.name || 'Friendly Battle League';
   const words = name.trim().split(/\s+/);
@@ -1028,13 +1044,16 @@ function introHtml(data, L) {
 
   return `<div class="intro-inner">
       <div class="intro-copy">
-        <div class="eyebrow">Clash Royale friendly battles · ${esc(seasonLabel(L.currentKey))} season</div>
+        <div class="eyebrow">${reason === 'season' ? `<span class="newseason">New season</span> · ${esc(seasonLabel(L.currentKey))}` : `Clash Royale friendly battles · ${esc(seasonLabel(L.currentKey))} season`}</div>
         <h1 class="intro-title">${title}</h1>
-        <p class="intro-sub">${L.all.ms.length ? `<b>${players}</b> players, <b>${L.all.ms.length}</b> battles and one crown per month.${lastChamp ? ` Last season's champ: <b>${esc(lastChamp.name)}</b>.` : ' Every friendly counts, and the battle log keeps score.'}` : 'Every friendly counts. Battles between league members are tracked automatically and settled by rating.'}</p>
+        ${reason === 'season' && prevKey ? `<p class="intro-sub">${champP
+          ? `${MEDAL}<b>${esc(champP.name)}</b> is the ${esc(seasonLabel(prevKey))} champion, finishing with a score of <b>${R(champ.score ?? champ.r)}</b>. A new season starts now: every rating moved halfway back to 1500, so the first few battles are placements.`
+          : `${esc(seasonLabel(prevKey))} is over. Nobody played the ${MIN_CHAMP_GAMES} battles needed to be crowned, so the title is up for grabs. Every rating moved halfway back to 1500 for the new season.`}</p>`
+        : `<p class="intro-sub">${L.all.ms.length ? `<b>${players}</b> players, <b>${L.all.ms.length}</b> battles and one crown per month.${lastChamp ? ` Last season's champ: <b>${esc(lastChamp.name)}</b>.` : ' Every friendly counts, and the battle log keeps score.'}` : 'Every friendly counts. Battles between league members are tracked automatically and settled by rating.'}</p>`}
         <div class="intro-actions"><button class="btn primary big" type="button" data-act="enter">Enter the league <span class="arr" aria-hidden="true">→</span></button></div>
         <div class="intro-facts">
           <div><span class="v">${esc(daysLeft(L).replace(' left', ''))}</span><span class="k">Left this season</span></div>
-          <div><span class="v">${hot ? esc(hot.name) : '—'}</span><span class="k">${hot ? `On a W${view.st[hot.id].streakN} streak` : 'Hottest streak'}</span></div>
+          <div><span class="v">${hot ? esc(hot.name) : '—'}</span><span class="k">${hot ? `On a W${cur.st[hot.id].streakN} streak` : 'Hottest streak'}</span></div>
           <div><span class="v num">${players}</span><span class="k">Players</span></div>
         </div>
       </div>
@@ -1048,7 +1067,7 @@ function renderIntro(L) {
     el.innerHTML = S.error ? `<div class="intro-inner"><div class="intro-copy"><h1 class="intro-title">${esc(D().league.name || 'Friendly Battle League')}</h1><p class="intro-sub">${esc(S.error)}</p></div></div>` : '';
     introKey = null; return;
   }
-  const html = introHtml(D(), L);
+  const html = introHtml(D(), L, route().reason);
   if (html === introKey) return; // background refreshes shouldn't replay the entrance
   introKey = html;
   el.innerHTML = html;
@@ -1069,6 +1088,7 @@ function pickView(L) {
 
 function render() {
   const data = D();
+  if (seenIntro() && !getSeenSeason()) setSeenSeason(nowSeason());
   const r0 = route();
   const onIntro = r0.v === 'welcome';
   $('#intro').hidden = !onIntro;
