@@ -367,7 +367,7 @@ function viewStandings(data, L, view) {
       <div class="panel-h"><h2>Season champions</h2><span class="muted" style="font-size:13px">Highest score at month's end, ${MIN_CHAMP_GAMES}+ battles</span></div>
       <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${MEDAL}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num" title="Final score">${R(c.score ?? c.r)}</span></a>` : ''; }).join('')}</div>
     </section>` : '';
-  return seasonBar(L) + strip + `<section class="panel">
+  const table = `<section class="panel">
     <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
     <div class="panel-b table-wrap" style="padding-top:6px">
       <table>
@@ -376,7 +376,9 @@ function viewStandings(data, L, view) {
       </table>
     </div>
     ${retired.length ? `<div class="panel-b muted" style="padding-top:0;font-size:13.5px">Retired: ${retired.map(p => `<a href="#p-${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}
-  </section>` + champs;
+  </section>`;
+  // Phones lead with the table itself; the summary tiles follow it.
+  return seasonBar(L) + (narrow() ? table + strip : strip + table) + champs;
 }
 function viewMatches(data, L, view) {
   const players = Object.values(data.players).sort((a, b) => a.name.localeCompare(b.name));
