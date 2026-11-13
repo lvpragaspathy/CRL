@@ -151,7 +151,7 @@ const formHtml = f => f.length ? `<span class="form" aria-label="Last ${f.length
 const streakHtml = s => s.streakN >= 1 && s.streakT ? `<span class="chip streak ${s.streakT}">${s.streakT}${s.streakN}</span>` : '<span class="muted">—</span>';
 const fmtPct = p => Math.round(p * 100) + '%';
 const champChip = (L, id) => L.champCount[id] ? `<span class="champ" title="${L.champCount[id]}× season champion">${MEDAL}${L.champCount[id] > 1 ? L.champCount[id] + '×' : ''}</span>` : '';
-function spark(vals, w = 96, h = 28) {
+function spark(vals, w = 76, h = 28) {
   if (vals.length < 3) return '<span class="muted">—</span>';
   const v = vals.slice(-15), mn = Math.min(...v), mx = Math.max(...v), span = Math.max(mx - mn, 12), mid = (mx + mn) / 2;
   const pts = v.map((y, i) => [2 + (i / (v.length - 1)) * (w - 6), h / 2 - ((y - mid) / span) * (h - 8)]);
@@ -160,9 +160,14 @@ function spark(vals, w = 96, h = 28) {
   return `<svg class="spark ${up ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Rating trend, last ${v.length} rated matches"><path class="sa" d="${d}L${L[0].toFixed(1)} ${h}L2 ${h}Z"/><path class="sl" d="${d}"/><circle cx="${L[0].toFixed(1)}" cy="${L[1].toFixed(1)}" r="2.6"/></svg>`;
 }
 
+// SVG charts scale with their box, so on a phone a 760-wide chart shrinks its labels to ~5px.
+// Draw a narrower chart there instead (text stays ~10px). render() reruns when the breakpoint flips.
+const PHONE_MQ = window.matchMedia('(max-width:560px)');
+const narrow = () => PHONE_MQ.matches;
+
 /** Rating over every rated game across seasons: the line is the rating, the band is ±RD, dashed lines mark season resets. */
 function ratingChart(points) {
-  const W = 640, H = 240, l = 46, r = 18, t = 14, b = 30;
+  const W = narrow() ? 380 : 640, H = narrow() ? 220 : 240, l = 42, r = 14, t = 14, b = 30;
   if (points.length < 2) return '<p class="muted" style="margin:0">The rating chart shows up after the first rated match.</p>';
   const rs = points.map(p => p.r);
   const mnV = Math.min(...rs), mxV = Math.max(...rs);
@@ -284,8 +289,11 @@ function viewEmpty() {
   </section>`;
 }
 const SCORE_HELP = 'Score = rating − 2×RD: the rating the system is about 95% sure you are at least. Rankings use it, so a hot start with few games can\'t top the table until it holds up.';
+// During placements the score climbs mostly because RD shrinks, so a "+311" there isn't a real swing: label it instead.
+const inPlacement = s => s.games > 0 && tier(s).name === 'Placement';
 function ratingCell(s) {
-  return `<span class="rating num" title="${SCORE_HELP}">${R(s.score)}</span>${s.lastScore != null ? `<span class="delta ${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}<span class="rd num" title="Rating ± RD (rating deviation: how sure the rating is; lower is more certain)">${R(s.r)} ±${R(s.rd)}</span>`;
+  const d = inPlacement(s) ? '<span class="delta only-sm muted">Placement</span>' : s.lastScore != null ? `<span class="delta ${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : '';
+  return `<span class="rating num" title="${SCORE_HELP}">${R(s.score)}</span>${d}<span class="rd num" title="Rating ± RD (rating deviation: how sure the rating is; lower is more certain)">${R(s.r)} ±${R(s.rd)}</span>`;
 }
 /* ---------- standings sorting ---------- */
 const SORT_KEYS = {
@@ -340,13 +348,13 @@ function viewStandings(data, L, view) {
       <td class="rank${rk === 1 ? ' first' : ''}">${rk === 1 ? CROWN : ''}${rk}</td>
       <td><a class="pl" href="#p-${esc(p.id)}">${avatar(p)}<span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}${champChip(L, p.id)}</span>${p.tag ? `<span class="tag">${esc(p.tag)}</span>` : '<span class="tag">No tag, not auto-tracked</span>'}</span></a></td>
       <td>${ratingCell(s)}</td>
-      <td class="hide-sm"><span class="chip ${t.cls}">${t.name}</span></td>
+      <td class="hide-sm c-tier"><span class="chip ${t.cls}">${t.name}</span></td>
       <td class="num">${s.w}-${s.l}${s.d ? '-' + s.d : ''}</td>
       <td class="num r hide-sm">${pct(s)}</td>
-      <td class="num r hide-md">${s.games ? (s.cf / s.games).toFixed(1) : '—'}</td>
-      <td class="hide-sm">${streakHtml(s)}</td>
+      <td class="num r hide-md c-cpg">${s.games ? (s.cf / s.games).toFixed(1) : '—'}</td>
+      <td class="hide-sm c-streak">${streakHtml(s)}</td>
       <td class="hide-md">${formHtml(s.form)}</td>
-      <td class="hide-md">${spark(s.scoreHist)}</td>
+      <td class="hide-md c-trend">${spark(s.scoreHist)}</td>
     </tr>`;
   }).join('');
   const retired = Object.values(data.players).filter(p => p.archived);
@@ -358,7 +366,7 @@ function viewStandings(data, L, view) {
     <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
     <div class="panel-b table-wrap" style="padding-top:6px">
       <table>
-        <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'Score')}<th class="hide-sm">Tier</th>${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md')}${sortTh('streak', 'Streak', 'hide-sm')}<th class="hide-md">Last 5</th><th class="hide-md">Trend</th></tr></thead>
+        <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'Score')}<th class="hide-sm c-tier">Tier</th>${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md c-cpg')}${sortTh('streak', 'Streak', 'hide-sm c-streak')}<th class="hide-md">Last 5</th><th class="hide-md c-trend">Trend</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>
@@ -386,6 +394,13 @@ function viewMatches(data, L, view) {
 }
 /* ---------- rivalry ---------- */
 const pairHash = (a, b) => `#r-${a}-${b}`;
+// Swap a match's sides (and its rating deltas) so a given player is always on the blue/left side.
+const SWAP_W = { a: 'b', b: 'a', draw: 'draw' };
+function flipMatch(m) {
+  return { ...m, a: m.b, b: m.a, ca: m.cb, cb: m.ca, winner: SWAP_W[m.winner] || m.winner, deckA: m.deckB, deckB: m.deckA,
+    stats: m.stats ? { a: m.stats.b, b: m.stats.a } : m.stats };
+}
+const flipDelta = d => (d ? { ...d, a: d.b, b: d.a, preA: d.preB, preB: d.preA, pA: d.pA == null ? d.pA : 1 - d.pA } : d);
 /** Resolve "#r-<a>-<b>" against real player ids (ids may themselves contain hyphens). */
 function resolvePair(raw, players) {
   for (let i = raw.indexOf('-'); i > 0; i = raw.indexOf('-', i + 1)) {
@@ -396,7 +411,7 @@ function resolvePair(raw, players) {
 }
 function momentumChart(data, A, B, ms) {
   if (ms.length < 2) return '';
-  const W = 760, H = 200, l = 40, r = 16, t = 16, b = 26;
+  const W = narrow() ? 380 : 760, H = narrow() ? 180 : 200, l = 34, r = 12, t = 16, b = 26;
   let run = 0; const pts = [0];
   for (const m of ms) { const aSide = m.a === A.id ? 'a' : 'b'; run += m.winner === 'draw' ? 0 : m.winner === aSide ? 1 : -1; pts.push(run); }
   const mx = Math.max(2, ...pts.map(Math.abs));
@@ -456,8 +471,9 @@ function rivalryPanel(data, L, view) {
     o.n++; o[m.winner === 'draw' ? 'd' : m.winner === aSide ? 'w' : 'l']++; mu.set(k, o);
   }
   const mus = [...mu.values()].sort((x, y) => y.n - x.n).slice(0, 8);
-  const shown = all.slice().reverse().slice(0, S.matchLimit);
-  const view0 = { delta: deltas };
+  const shown = all.slice().reverse().slice(0, S.matchLimit)
+    .map(m => (m.a === A.id ? [m, deltas[m.id]] : [flipMatch(m), flipDelta(deltas[m.id])]));
+  const view0 = { delta: Object.fromEntries(shown.map(([m, d]) => [m.id, d])) };
   const lead = tA.w - tA.l;
   return `<section class="panel rivalry">
     <div class="panel-h"><h2>Rivalry</h2><span class="muted" style="font-size:13px">Pick any two players. Tap a cell in the table below to jump here.</span></div>
@@ -482,11 +498,12 @@ function rivalryPanel(data, L, view) {
       <h3 class="sub" style="margin-top:18px">Series momentum</h3>
       ${momentumChart(data, A, B, all) || '<p class="muted" style="margin:0">Needs at least 2 battles.</p>'}
       ${mus.length ? `<h3 class="sub" style="margin-top:18px">Deck matchups</h3>
-        <div class="table-wrap"><table class="compact"><thead><tr><th>${esc(A.name)} played</th><th>${esc(B.name)} played</th><th class="r">Battles</th><th class="r">${esc(A.name)}</th></tr></thead><tbody>
-        ${mus.map(o => `<tr><td><b>${esc(o.a)}</b></td><td>${esc(o.b)}</td><td class="num r">${o.n}</td><td class="num r ${o.w > o.l ? 'up' : o.w < o.l ? 'down' : ''}">${rec(o)}</td></tr>`).join('')}
+        <ul class="mu-list" aria-label="Deck matchups">${mus.map(o => `<li><span class="mu-d"><b>${esc(o.a)}</b> <span class="muted">vs</span> ${esc(o.b)}</span><span class="mu-r num ${o.w > o.l ? 'up' : o.w < o.l ? 'down' : ''}">${rec(o)}</span></li>`).join('')}</ul>
+        <div class="table-wrap mu-table"><table class="compact"><thead><tr><th>${esc(A.name)} played</th><th>${esc(B.name)} played</th><th class="r">Battles</th><th class="r">${esc(A.name)}</th></tr></thead><tbody>
+        ${mus.map(o => `<tr><td class="wrap"><b>${esc(o.a)}</b></td><td class="wrap">${esc(o.b)}</td><td class="num r">${o.n}</td><td class="num r ${o.w > o.l ? 'up' : o.w < o.l ? 'down' : ''}">${rec(o)}</td></tr>`).join('')}
         </tbody></table></div>` : ''}
       <h3 class="sub" style="margin-top:18px">Every battle (${all.length})</h3>
-      <div class="mlist">${shown.map(m => matchRow(m, data, view0)).join('')}</div>
+      <div class="mlist">${shown.map(([m]) => matchRow(m, data, view0)).join('')}</div>
       ${all.length > shown.length ? `<div style="text-align:center;padding-top:12px"><button class="btn small" type="button" data-act="more">Show ${Math.min(50, all.length - shown.length)} more</button></div>` : ''}`
     : `<p class="muted" style="margin:14px 0 0">${esc(A.name)} and ${esc(B.name)} haven't battled yet.</p>`}
     </div>
@@ -577,8 +594,8 @@ function matchDetail(id) {
       <div><h4 class="sub">${esc(B.name)}'s towers</h4>${towersHtml(m.stats.b, m.ca, towerMax(B.id, data))}</div>
     </div>
     ${hp ? `<p class="muted chart-note">${m.winner === 'draw' ? 'Tower HP difference' : 'Winner finished'} <b class="${hp.margin >= 0 ? 'up' : 'down'}">${hp.margin >= 0 ? '+' : '−'}${Math.abs(R0(hp.margin)).toLocaleString()} HP</b> ${m.winner === 'draw' ? '' : 'ahead'}${hp.close ? ' (close game)' : ''}.</p>` : ''}
-    ${lA != null || lB != null ? `<h4 class="sub" style="margin-top:14px">Elixir leaked</h4>${leakRow(A, lA)}${leakRow(B, lB)}` : ''}` : '<p class="muted" style="margin:0">No tower or elixir data: this battle was logged by hand.</p>'}
-    ${m.deckA || m.deckB ? `<h4 class="sub" style="margin-top:14px">Decks</h4>${deckBlock(A, m.deckA)}${deckBlock(B, m.deckB)}` : ''}
+    ${lA != null || lB != null ? `<h4 class="sub">Elixir leaked</h4><div class="md-leak">${leakRow(A, lA)}${leakRow(B, lB)}</div>` : ''}` : '<p class="muted" style="margin:0">No tower or elixir data: this battle was logged by hand.</p>'}
+    ${m.deckA || m.deckB ? `<h4 class="sub">Decks</h4>${deckBlock(A, m.deckA)}${deckBlock(B, m.deckB)}` : ''}
     ${m.notes ? `<div class="deck" style="margin:12px 0 0"><b>Notes</b>${esc(m.notes)}</div>` : ''}`;
   const foot = `<a class="btn" href="${pairHash(A.id, B.id)}" data-act="close-nav">Rivalry: ${esc(A.name)} vs ${esc(B.name)}</a>
     ${writable() ? `<button class="btn" type="button" data-act="edit-match" data-id="${esc(m.id)}">Edit</button><button class="btn danger" type="button" data-act="del-match" data-id="${esc(m.id)}">Delete</button>` : ''}
@@ -656,10 +673,10 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${t.cls}">${t.name}</span><span>${rankTxt}</span>${p.tag ? `<span>· ${esc(p.tag)}</span><span class="chip track on">Auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}<span>· Joined ${esc(fmtDate(p.createdAt, false))}</span>${ladderChip(p)}</div>
+        <div class="meta"><span class="chip ${t.cls}">${t.name}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
-      <div class="big"><div class="k" title="${SCORE_HELP}">Score</div><div class="rating num">${R(s.score)}</div><div class="muted" style="font-size:13px">Rating ${R(s.r)} ±${R(s.rd)} · Peak ${R(s.peak)}${s.lastScore != null ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}</div></div>
+      <div class="big"><div class="k" title="${SCORE_HELP}">Score</div><div class="rating num">${R(s.score)}</div><div class="muted" style="font-size:13px">Rating ${R(s.r)} ±${R(s.rd)} · Peak ${R(s.peak)}${s.lastScore != null && !inPlacement(s) ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}</div></div>
       ${w ? `<div class="tools">
         <button class="btn small" type="button" data-act="log" data-id="${esc(id)}">Log a match</button>
         <button class="btn small" type="button" data-act="edit-player" data-id="${esc(id)}">Edit profile</button>
@@ -687,7 +704,7 @@ function viewPlayer(id, data, L, view) {
     </section>
     <section class="panel">
       <div class="panel-h"><h2>Head to head</h2></div>
-      <div class="panel-b table-wrap">${h2h.length ? `<table class="compact"><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-lg">Crowns</th><th class="r">Rating won</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
+      <div class="panel-b table-wrap">${h2h.length ? `<table class="compact h2h"><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-lg">Crowns</th><th class="r">Rating won</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
         const o = data.players[oid]; const pw = winProb(L.live[id], L.live[oid]);
         return `<tr><td><a class="pl" href="#p-${esc(oid)}">${avatar(o)}<span class="nm">${esc(o.name)}</span></a></td><td class="num">${h.w}-${h.l}${h.d ? '-' + h.d : ''}</td><td class="num r hide-lg">${h.cf}–${h.ca}</td><td class="num r ${dCls(h.net)}">${fmtD(h.net)}</td><td class="num r ${pw >= 0.5 ? 'up' : 'down'}">${fmtPct(pw)}</td></tr>`;
       }).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No battles in this view.</p>'}</div>
@@ -707,7 +724,7 @@ const rec3 = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
 
 function raceChart(data, RC) {
   if (!RC.series.length) return '<p class="muted" style="margin:0">No rated battles in this view yet.</p>';
-  const W = 760, H = 300, l = 46, r = 120, t = 14, b = 28;
+  const W = narrow() ? 430 : 760, H = narrow() ? 300 : 300, l = 40, r = narrow() ? 104 : 120, t = 14, b = 28;
   const rs = RC.series.flatMap(s => s.pts.map(p => p.r));
   const step = Math.max(...rs) - Math.min(...rs) > 400 ? 100 : 50;
   let lo = Math.floor((Math.min(...rs) - 20) / step) * step, hi = Math.ceil((Math.max(...rs) + 20) / step) * step;
@@ -727,7 +744,7 @@ function raceChart(data, RC) {
   // End labels, nudged apart so names don't overlap.
   const labels = RC.series.map(s => ({ s, y: y(s.last) })).sort((a, b) => a.y - b.y);
   for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 15) labels[i].y = labels[i - 1].y + 15;
-  const lab = labels.map(({ s, y: yy }) => { const p = data.players[s.id]; return `<circle cx="${W - r}" cy="${y(s.last).toFixed(1)}" r="3.5" style="fill:${esc(p.color)}"/><text class="rlab" x="${W - r + 8}" y="${(yy + 4).toFixed(1)}" style="fill:${esc(p.color)}">${esc(p.name.length > 11 ? p.name.slice(0, 10) + '…' : p.name)} ${R0(s.last)}</text>`; }).join('');
+  const lab = labels.map(({ s, y: yy }) => { const p = data.players[s.id]; return `<circle cx="${W - r}" cy="${y(s.last).toFixed(1)}" r="3.5" style="fill:${esc(p.color)}"/><text class="rlab" x="${W - r + 8}" y="${(yy + 4).toFixed(1)}" style="fill:${esc(p.color)}">${esc(trunc(p.name, narrow() ? 9 : 11))} ${R0(s.last)}</text>`; }).join('');
   const d0 = new Date(RC.start), d1 = new Date(RC.end);
   const fmt = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating race: ${RC.series.map(s => `${esc(data.players[s.id].name)} ${R0(s.last)}`).join(', ')}">
@@ -736,6 +753,7 @@ function raceChart(data, RC) {
   </svg>`;
 }
 const R0 = v => Math.round(v);
+const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
 
 function heatmapHtml(hm) {
   if (!hm.total) return '<p class="muted" style="margin:0">No battles in this view yet.</p>';
@@ -771,7 +789,7 @@ function viewStats(data, L, view) {
   const leakTbl = lk.length ? `<table class="compact"><thead><tr><th>Player</th><th class="r">Leaked / game</th><th class="r">In wins</th><th class="r">In losses</th></tr></thead><tbody>
     ${lk.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num r"><span class="leakbar"><i style="width:${Math.min(100, r.avg * 10)}%"></i></span>${r.avg.toFixed(1)}</td><td class="num r">${r.avgWin == null ? '—' : r.avgWin.toFixed(1)}</td><td class="num r">${r.avgLoss == null ? '—' : r.avgLoss.toFixed(1)}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with elixir data.</p>';
-  const tiltCell = (rate, o, cls = '') => `<td class="num r ${cls}">${pctOrDash(rate)}<span class="games">${o.n} game${o.n === 1 ? '' : 's'}</span></td>`;
+  const tiltCell = (rate, o, cls = '') => `<td class="num r ${cls}">${pctOrDash(rate)}<span class="games"><span class="g-long">${o.n} game${o.n === 1 ? '' : 's'}</span><span class="g-short">(${o.n})</span></span></td>`;
   const tiltTbl = tl.length ? `<table class="compact tilt"><thead><tr><th>Player</th><th class="r">After a win</th><th class="r">After a loss</th><th class="r hide-md">1st game of a session</th><th class="r hide-md">Later games</th><th>Verdict</th></tr></thead><tbody>
     ${tl.map(r => {
       const gap = r.afterWRate != null && r.afterLRate != null ? r.afterWRate - r.afterLRate : null;
@@ -781,10 +799,10 @@ function viewStats(data, L, view) {
     }).join('')}
     </tbody></table><p class="muted chart-note">Win rate in each situation. A new session starts after a ${SESSION_GAP_MIN}+ minute break. "Tilts" means 20+ points worse after a loss than after a win (3+ games after a loss); "Resilient" is the reverse.</p>` : '<p class="muted" style="margin:0">Not enough games yet.</p>';
   const metaHtml = mt.decks ? `<div class="cardcols">
-      <div><h3 class="sub">Archetypes</h3><table><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
-        ${mt.archetypes.slice(0, 10).map(a => `<tr><td><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
+      <div class="table-wrap"><h3 class="sub">Archetypes</h3><table class="compact"><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
+        ${mt.archetypes.slice(0, 10).map(a => `<tr><td class="wrap"><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
       </tbody></table></div>
-      <div><h3 class="sub">Most played cards</h3><table class="ctable"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
+      <div class="table-wrap"><h3 class="sub">Most played cards</h3><table class="ctable compact"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
         ${mt.cards.slice(0, 12).map(c => `<tr><td><span class="cname">${cardTile(c.card, ' sm')}<span>${esc(c.card.name)}</span></span></td><td class="r"><span class="usebar"><i style="width:${Math.round(c.usage * 100)}%"></i></span><span class="num">${fmtPct(c.usage)}</span></td><td class="r num ${c.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(c.rate)}</td></tr>`).join('')}
       </tbody></table></div>
     </div><p class="muted chart-note">From ${mt.decks} decks in auto-imported battles. Archetypes are named by their win conditions.</p>` : '<p class="muted" style="margin:0">Deck data fills in from auto-imported battles.</p>';
@@ -934,7 +952,7 @@ function viewLab(data, L) {
     </section>
     <section class="panel">
       <div class="panel-h"><h2>By bucket</h2></div>
-      <div class="panel-b table-wrap"><table><thead><tr><th>Favorite's chance</th><th class="r">Battles</th><th class="r">Predicted</th><th class="r">Won</th></tr></thead><tbody>
+      <div class="panel-b table-wrap"><table class="compact"><thead><tr><th>Favorite's chance</th><th class="r">Battles</th><th class="r">Predicted</th><th class="r">Won</th></tr></thead><tbody>
         ${cal.map(c => `<tr><td>${fmtPct(c.lo)}–${fmtPct(c.hi)}</td><td class="num r">${c.n}</td><td class="num r">${c.n ? fmtPct(c.predicted) : '—'}</td><td class="num r ${c.n ? (Math.abs(c.actual - c.predicted) <= 0.08 ? 'up' : 'down') : ''}">${c.n ? fmtPct(c.actual) : '—'}</td></tr>`).join('')}
       </tbody></table>
       <p class="muted chart-note">Log-loss punishes confident wrong calls hardest; 0.693 is what always guessing 50% scores. Brier is the mean squared error of the probabilities; 0.25 for always guessing 50%. The Elo column is plain Elo (K=24, no margins, no seasons) on the same battles, as a baseline.</p></div>
@@ -1124,6 +1142,7 @@ function render() {
   if (r.v === 'stats') drawRecap(data, L);
   if (focusId && ['seasonSel', 'filterSel', 'predA', 'predB'].includes(focusId)) document.getElementById(focusId)?.focus();
 }
+PHONE_MQ.addEventListener('change', () => { if (!dlg.open) render(); });
 window.addEventListener('hashchange', () => { S.matchLimit = 50; render(); window.scrollTo(0, 0); });
 
 /* ---------- dialogs ---------- */
