@@ -232,7 +232,7 @@ label.f input,label.f select,label.f textarea{color:var(--ink);font-weight:400;f
 .team.b{background:linear-gradient(180deg,rgba(255,83,103,.28),rgba(255,83,103,.08));border:1px solid rgba(255,83,103,.45)}
 .team .lbl{font-stretch:75%;text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:800}
 .team.a .lbl{color:#a9c9ff} .team.b .lbl{color:#ffb0ba}
-.team select{width:100%;background:rgba(11,18,34,.75)}
+.team select{width:100%;background-color:rgba(11,18,34,.75)}
 .crowns{display:flex;justify-content:center;gap:4px}
 .crowns button{background:none;border:0;padding:2px;cursor:pointer;border-radius:8px}
 .crowns .crown{width:34px;height:29px;fill:rgba(255,255,255,.14);transition:fill .12s, transform .12s}
@@ -604,6 +604,76 @@ h4.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
   .matrix th,.matrix td{padding:4px 2px}
   .matrix td.cell a{padding:7px 2px;font-size:12px}
 }
+
+/* ---------- scrollbars: thin and dark everywhere ---------- */
+:root{scrollbar-color:#33446f var(--bg)}
+.dlg-b,.table-wrap,.champs,nav.tabs,::picker(select){scrollbar-color:#33446f transparent;scrollbar-width:thin}
+::-webkit-scrollbar{width:10px;height:10px;background:transparent}
+::-webkit-scrollbar-thumb{background:#33446f;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background-color:#45588a}
+::-webkit-scrollbar-corner{background:transparent}
+
+/* ---------- dialogs: header and buttons stay put, only the middle scrolls ---------- */
+dialog[open]{display:flex;flex-direction:column;overflow:hidden}
+dialog > form{display:flex;flex-direction:column;min-height:0;flex:0 1 auto}
+.dlg-h,.dlg-f{flex:none}
+.dlg-b{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+html:has(dialog[open]){overflow:hidden}   /* no second scrollbar from the page behind */
+
+/* ---------- dropdowns ---------- */
+select{appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:34px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6' fill='none' stroke='%238e9bc1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;background-size:16px}
+select:hover{border-color:#3a4c7e}
+select:focus{outline:none}
+select:focus-visible,select:open{border-color:var(--gold);box-shadow:0 0 0 3px rgba(255,198,58,.16)}
+select option{background:var(--panel);color:var(--ink)}
+/* Browsers that support styled dropdowns (Chrome/Edge 135+) get a menu that matches the site.
+   Others keep their native menu, which on phones is the better picker anyway. */
+@supports (appearance: base-select) {
+  select,::picker(select){appearance:base-select}
+  select{display:inline-flex;align-items:center;justify-content:space-between;gap:10px;background-image:none;padding-right:10px}
+  select::picker-icon{content:"";width:16px;height:16px;flex:none;transition:rotate .18s;
+    background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 9l6 6 6-6' fill='none' stroke='%238e9bc1' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/16px no-repeat}
+  select:open::picker-icon{rotate:180deg}
+  ::picker(select){background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:5px;margin-block:6px;
+    box-shadow:0 18px 44px rgba(0,0,0,.5);max-height:min(360px,60vh);min-width:anchor-size(width)}
+  select option{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;background:transparent;color:var(--ink);font-weight:600;font-size:14px;cursor:pointer}
+  select option:hover,select option:focus-visible{background:var(--panel-2);outline:none}
+  select option:checked{color:var(--gold);background:rgba(255,198,58,.08)}
+  select option::checkmark{order:1;margin-left:auto;color:var(--gold);font-weight:800}
+  select option:disabled{color:var(--muted);cursor:default}
+}
+@media (prefers-reduced-motion:reduce){ select::picker-icon{transition:none} }
+
+/* ---------- phones: bottom tab bar instead of the top tabs ---------- */
+.bottombar,.mobile-only{display:none}
+@media (max-width:560px){
+  nav.tabs{display:none}
+  .syncpill.mobile-only:not([hidden]){display:inline-flex}
+  .top .actions{align-items:center}
+  .bottombar{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:40;
+    background:rgba(13,20,38,.94);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+    border-top:1px solid var(--line);padding:6px 6px calc(6px + env(safe-area-inset-bottom))}
+  .bottombar a{display:grid;justify-items:center;gap:3px;padding:7px 0 5px;text-decoration:none;color:var(--muted);
+    font-size:11px;font-weight:700;letter-spacing:.01em;border-radius:12px;-webkit-tap-highlight-color:transparent}
+  .bottombar svg{width:23px;height:23px;fill:currentColor}
+  .bottombar a[aria-current="page"]{color:var(--gold);background:rgba(255,198,58,.09)}
+  .bottombar a:active{background:rgba(255,255,255,.05)}
+  body{padding-bottom:calc(74px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
+}
+
+/* ---------- phones: intro ticker sits at the top ---------- */
+@media (max-width:560px){
+  .intro{grid-template-rows:auto 1fr}
+  .intro .ticker{order:-1;border-top:0;border-bottom:1px solid var(--line)}
+  .intro-inner{padding-top:28px}
+}
+
+/* ---------- new-season welcome ---------- */
+.newseason{color:var(--gold)}
+.intro-sub .medal{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
 </style>
 </head>
 <body>
@@ -618,6 +688,7 @@ h4.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
       </div>
     </div>
     <div class="actions">
+      <button class="syncpill mobile-only" type="button" data-act="sync" hidden><span class="dot"></span><span class="synctext">Auto-sync</span></button>
       <button class="btn" type="button" data-act="unlock" id="unlockBtn" hidden><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 00-5 5v3H6a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2v-8a2 2 0 00-2-2H9V7a3 3 0 016 0h2a5 5 0 00-5-5z"/></svg>Unlock editing</button>
       <button class="btn edit-only" type="button" data-act="add-player"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>Add player</button>
       <button class="btn primary edit-only" type="button" data-act="log"><svg viewBox="0 0 24 20"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/></svg>Log a match</button>
@@ -630,7 +701,7 @@ h4.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
     <a href="#stats" data-tab="stats">Stats</a>
     <a href="#lab" data-tab="lab">Lab</a>
     <span class="spacer"></span>
-    <button class="syncpill" type="button" id="syncPill" data-act="sync" hidden><span class="dot"></span><span id="syncText">Auto-sync</span></button>
+    <button class="syncpill" type="button" data-act="sync" hidden><span class="dot"></span><span class="synctext">Auto-sync</span></button>
   </nav>
   <div id="banner"></div>
   <main id="view"><div class="loading">Loading the league…</div></main>
@@ -655,6 +726,13 @@ h4.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
       <button class="btn small edit-only" type="button" data-act="lock" id="lockBtn">Lock editing</button>
     </div>
   </footer>
+<nav class="bottombar" aria-label="Sections">
+  <a href="#standings" data-tab="standings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 13h5v8H3zM9.5 7h5v14h-5zM16 10.5h5V21h-5z"/></svg><span>Standings</span></a>
+  <a href="#matches" data-tab="matches"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v2.2H4zm0 5.9h16v2.2H4zm0 5.9h10.5V19H4z"/></svg><span>Matches</span></a>
+  <a href="#rivalries" data-tab="rivalries"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 3.5L3 8l4.5 4.5V9.2H15V6.8H7.5zm9 8V14.8H9v2.4h7.5v3.3L21 16z"/></svg><span>Rivalries</span></a>
+  <a href="#stats" data-tab="stats"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h2.2v15.8H21V21H3zm4.2 12.6l4.3-5.4 3 3 4.6-6.4 1.8 1.3-6.1 8.5-3-3-2.9 3.6z"/></svg><span>Stats</span></a>
+  <a href="#lab" data-tab="lab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6v2.2h-1.1v4.9l5.5 9.3A2.3 2.3 0 0117.4 22H6.6a2.3 2.3 0 01-2-3.6l5.5-9.3V4.2H9zm3.1 2.2v5.5L9.3 14.5h5.4L11.9 9.7V4.2z"/></svg><span>Lab</span></a>
+</nav>
 </div>
 <dialog id="dlg"></dialog>
 <div id="toast" class="toast" hidden></div>
