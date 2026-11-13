@@ -351,6 +351,19 @@ function sortTh(key, label, cls = '') {
   const arrow = on ? (dir === 'asc' ? '↑' : '↓') : '';
   return `<th class="sortable ${cls}" aria-sort="${aria}"><button type="button" data-act="sort" data-key="${key}">${label}<span class="sarr" aria-hidden="true">${arrow}</span></button></th>`;
 }
+// Phones hide most stat columns; the full table opens every column in a sheet with the player column pinned.
+const ICON_EXPAND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v2H7.4l3.3 3.3-1.4 1.4L6 7.4V10H4zm10 0h6v6h-2V7.4l-3.3 3.3-1.4-1.4L16.6 6H14zM4 14h2v2.6l3.3-3.3 1.4 1.4L7.4 18H10v2H4zm12.6 4-3.3-3.3 1.4-1.4 3.3 3.3V14h2v6h-6v-2z"/></svg>';
+let lastStandings = null;
+function pinStandings() {
+  const box = dlg.querySelector('.st-full'), first = box?.querySelector('thead th');
+  if (first) box.style.setProperty('--c1', first.offsetWidth + 'px');
+}
+function standingsFull() {
+  if (!lastStandings) return;
+  openDlg(`Standings <span class="muted st-sub">${esc(lastStandings.title)}</span>`, `<div class="st-full table-wrap">${lastStandings.tbl}</div><p class="muted st-hint">Swipe sideways for more columns. Tap a header to sort.</p>`,
+    '<button class="btn primary" type="button" data-act="close">Done</button>',
+    form => { form.closest('dialog').classList.add('wide', 'sheet-full'); pinStandings(); });
+}
 function viewStandings(data, L, view) {
   const all = ranking(data, view);
   if (!Object.keys(data.players).length) return viewEmpty();
@@ -390,14 +403,15 @@ function viewStandings(data, L, view) {
       <div class="panel-h"><h2>Season champions</h2><span class="muted" style="font-size:13px">Most RP at month's end, ${MIN_CHAMP_GAMES}+ battles</span></div>
       <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${MEDAL}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num" title="Final RP">${R(c.score ?? c.r)} <small>RP</small></span></a>` : ''; }).join('')}</div>
     </section>` : '';
-  const table = `<section class="panel">
-    <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
-    ${rows.length ? `<div class="panel-b table-wrap" style="padding-top:6px">
-      <table>
+  const tbl = `      <table>
         <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'RP')}${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md c-cpg')}${sortTh('streak', 'Streak', 'hide-sm c-streak')}<th class="hide-md">Last 5</th><th class="hide-md c-trend">Trend</th></tr></thead>
         <tbody>${body}</tbody>
-      </table>
-    </div>` : `<div class="panel-b muted" style="padding-top:8px">Nobody is placed yet${L.seasons.length > 1 && view.key !== 'all' ? ' this season' : ''}. The table fills in as players finish their placement battles.</div>`}
+      </table>`;
+  lastStandings = { tbl, title: view.key === 'all' ? 'All time' : seasonLabel(view.key) };
+  const table = `<section class="panel">
+    <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span>${rows.length ? `<button class="btn small st-expand" type="button" data-act="standings-full" aria-label="Open the full standings table">${ICON_EXPAND}Full table</button>` : ''}</div>
+    ${rows.length ? `<div class="panel-b table-wrap" style="padding-top:6px">
+${tbl}    </div>` : `<div class="panel-b muted" style="padding-top:8px">Nobody is placed yet${L.seasons.length > 1 && view.key !== 'all' ? ' this season' : ''}. The table fills in as players finish their placement battles.</div>`}
     ${unplaced.length ? unplacedHtml(unplaced, view) : ''}
     ${retired.length ? `<div class="panel-b muted" style="padding-top:0;font-size:13.5px">Retired: ${retired.map(p => `<a href="#p-${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}
   </section>`;
@@ -1658,7 +1672,8 @@ function makeDemo() {
 /* ---------- events ---------- */
 document.addEventListener('click', async e => {
   const row = e.target.closest('tr[data-href]');
-  if (row && !e.target.closest('a,button')) { location.hash = row.dataset.href; return; }
+  if (row && !e.target.closest('a,button')) { if (dlg.contains(row)) closeDlg(); location.hash = row.dataset.href; return; }
+  if (e.target.closest('.st-full a[href^="#p-"]')) closeDlg();   // player links inside the full standings sheet
   const b = e.target.closest('[data-act]');
   if (!b) {
     const row = e.target.closest('.match[data-match]');
@@ -1667,6 +1682,7 @@ document.addEventListener('click', async e => {
   }
   const act = b.dataset.act, id = b.dataset.id, data = D();
   if (act === 'close') { closeDlg(); return; }
+  if (act === 'standings-full') { standingsFull(); return; }
   if (act === 'close-nav') { closeDlg(); return; } // link inside the sheet: close it and let the link navigate
   if (act === 'details') { matchDetail(id); return; }
   if (act === 'enter') { enterLeague(); return; }
@@ -1681,7 +1697,9 @@ document.addEventListener('click', async e => {
     else if (cur.dir === SORT_KEYS[key].dir) S.sort = { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
     else S.sort = { key: null, dir: 'desc' };
     render();
-    document.querySelector(`th [data-key="${key}"]`)?.focus();
+    const box = dlg.open && dlg.querySelector('.st-full');
+    if (box && lastStandings) { box.innerHTML = lastStandings.tbl; pinStandings(); }
+    (box || document).querySelector(`th [data-key="${key}"]`)?.focus();
     return;
   }
   if (act === 'more') { S.matchLimit += 50; render(); return; }

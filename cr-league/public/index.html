@@ -965,6 +965,27 @@ table.h2h .pl .nm{max-width:128px}
 .rd-names a{font-weight:650;text-decoration:none}
 .rd-names a:hover{text-decoration:underline}
 @media (max-width:560px){ .chip.rkmove.sm{display:block;width:max-content;margin:3px 0 0} .side.b .chip.rkmove.sm{margin-left:auto} .rd-row{grid-template-columns:82px 1fr} }
+
+/* ---------- full standings sheet (phones) ---------- */
+.st-expand{display:none;margin-left:auto}
+.st-expand svg{width:15px;height:15px;fill:currentColor}
+.st-sub{font-family:var(--body,inherit);font-size:14px;margin-left:6px}
+.st-hint{margin:0;font-size:12.5px}
+.st-full{overflow-x:auto;margin:0 -18px;padding:0 0 4px}
+.st-full table{min-width:max-content}
+.st-full th,.st-full td{white-space:nowrap}
+.st-full .hide-sm,.st-full .hide-md,.st-full .c-cpg,.st-full .c-trend{display:table-cell}
+.st-full .tag,.st-full .pl .av{display:none}
+.st-full .pl .nm{max-width:none;overflow:visible}
+.st-full td:nth-child(2) .pl{gap:0}
+.st-full th:first-child,.st-full td:first-child{position:sticky;left:0;z-index:2;background:var(--panel);padding-left:18px}
+.st-full th:nth-child(2),.st-full td:nth-child(2){position:sticky;left:var(--c1,48px);z-index:2;background:var(--panel);box-shadow:8px 0 8px -8px rgba(0,0,0,.6)}
+.st-full tbody tr.link:hover td{background:var(--panel)}
+@media (max-width:560px){
+  .st-expand{display:inline-flex}
+  dialog.sheet-full{width:calc(100% - 12px);max-width:none;max-height:calc(100% - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));margin:auto}
+  .st-full{margin:0 -18px}
+}
 </style>
 </head>
 <body>
