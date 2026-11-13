@@ -1,5 +1,5 @@
 import {
-  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
+  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
 } from './rating.js';
 import {
   hpInfo, clutch, leaks, tilt, heatmap, meta, race, records, weekly, scorePreds, calibration, eloPreds, tune, GRID, archetype,
@@ -171,14 +171,16 @@ function spark(vals, w = 76, h = 28) {
 const PHONE_MQ = window.matchMedia('(max-width:560px)');
 const narrow = () => PHONE_MQ.matches;
 
-/** Skill over every rated game across seasons: the band is the skill range (±2 RD), the line its centre; dashed lines mark season resets. */
+/** RP and skill over every rated game across seasons: the gold line is RP (dashed while unplaced), the thin line the centre of the
+ *  skill range, the band the range itself. Scaled so every RP and centre point fits; only the band's upper edge may clip. */
 function ratingChart(points) {
   const W = narrow() ? 380 : 640, H = narrow() ? 220 : 240, l = 42, r = 14, t = 14, b = 30;
-  if (points.length < 2) return '<p class="muted" style="margin:0">The skill chart shows up after the first rated match.</p>';
-  const rs = points.map(p => p.r);
-  const mnV = Math.min(...rs), mxV = Math.max(...rs);
+  if (points.length < 2) return '<p class="muted" style="margin:0">The chart shows up after the first rated match.</p>';
+  const rp = p => p.r - 2 * p.rd;
+  const vals = points.flatMap(p => [p.r, rp(p)]);
+  const mnV = Math.min(...vals), mxV = Math.max(...vals);
   const step = (mxV - mnV) > 400 ? 100 : 50;
-  let lo = Math.floor((mnV - 40) / step) * step, hi = Math.ceil((mxV + 40) / step) * step;
+  let lo = Math.floor((mnV - 30) / step) * step, hi = Math.ceil((mxV + 30) / step) * step;
   if (hi - lo < step * 3) { lo -= step; hi += step; }
   const n = points.length - 1;
   const x = i => l + (i / n) * (W - l - r);
@@ -186,22 +188,26 @@ function ratingChart(points) {
   let g = '';
   for (let v = lo; v <= hi; v += step) g += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
   const base = START_R > lo && START_R < hi ? `<line class="base" x1="${l}" x2="${W - r}" y1="${y(START_R)}" y2="${y(START_R)}"/>` : '';
-  const line = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r).toFixed(1)).join('');
+  const centre = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r).toFixed(1)).join('');
+  // The RP line is split into placed (solid) and unplaced (dashed) runs.
+  const seg = (want) => { let d = '', pen = false; points.forEach((p, i) => { const on = (p.rd <= PROVISIONAL_RD) === want; if (on || (pen && i > 0)) d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(rp(p)).toFixed(1); pen = on; }); return d; };
   const upper = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r + 2 * p.rd).toFixed(1)).join('');
-  const lower = points.map((p, i) => 'L' + x(n - i).toFixed(1) + ' ' + y(points[n - i].r - 2 * points[n - i].rd).toFixed(1)).join('');
+  const lower = points.map((p, i) => 'L' + x(n - i).toFixed(1) + ' ' + y(rp(points[n - i])).toFixed(1)).join('');
   const seasons = points.map((p, i) => p.reset ? `<line class="sline" x1="${x(i).toFixed(1)}" x2="${x(i).toFixed(1)}" y1="${t}" y2="${H - b}"/><text class="slabel" x="${(x(i) + 4).toFixed(1)}" y="${t + 10}">${esc(seasonLabel(p.season, true).split(' ')[0])}</text>` : '').join('');
   const last = points[n];
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Skill history over ${n} points, now ${R(last.r - 2 * last.rd)} to ${R(last.r + 2 * last.rd)}">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="RP and skill history over ${n} points, now ${R(rp(last))} RP, skill ${R(rp(last))} to ${R(last.r + 2 * last.rd)}">
     <defs>
       <clipPath id="plot"><rect x="${l}" y="${t}" width="${W - l - r}" height="${H - t - b}"/></clipPath>
     </defs>
     ${g}${base}
     <g clip-path="url(#plot)"><path class="band" d="${upper}${lower}Z"/></g>
     ${seasons}
-    <path class="line" d="${line}"/>
-    <circle class="end" cx="${x(n).toFixed(1)}" cy="${y(last.r).toFixed(1)}" r="5"/>
-    <text x="${l}" y="${H - 8}">Start</text>
-    <text x="${W - r}" y="${H - 8}" text-anchor="end">Now · RP ${R(last.r - 2 * last.rd)}</text>
+    <path class="line centre" d="${centre}"/>
+    <path class="line rp unplaced" d="${seg(false)}"/>
+    <path class="line rp" d="${seg(true)}"/>
+    <circle class="end" cx="${x(n).toFixed(1)}" cy="${y(rp(last)).toFixed(1)}" r="5"/>
+    <text x="${l}" y="${H - 8}">First battle</text>
+    <text x="${W - r}" y="${H - 8}" text-anchor="end">Now · ${R(rp(last))} RP</text>
   </svg>`;
 }
 
@@ -708,9 +714,9 @@ function viewPlayer(id, data, L, view) {
   const pcl = clutch(data, view).find(r => r.id === id), plk = leaks(data, view).find(r => r.id === id);
   const h2h = Object.entries(s.h2h).sort((a, b) => b[1].n - a[1].n);
   const w = writable();
-  const points = [{ r: START_R, rd: 350 }, ...(L.timeline[id] || [])];
-  // If they've never played, the reset entries alone aren't a history.
-  const chartPts = (L.timeline[id] || []).some(x => !x.reset) ? points : [];
+  // Season resets before the first battle aren't history; the chart starts at the first game.
+  const tl = L.timeline[id] || [], firstGame = tl.findIndex(x => !x.reset);
+  const chartPts = firstGame < 0 ? [] : tl.slice(firstGame);
   return `<a class="back" href="#standings">← Standings</a>
   ${seasonBar(L)}
   <section class="panel">
@@ -718,11 +724,11 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${bestEver ? `<span class="chip ${bestEver.cls}" title="Highest rank reached, all time">Best: ${bestEver.label}</span>` : ''}${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
+        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
       <div class="big"><div class="k" title="${RP_HELP}">Ranked Points</div><div class="rating num${placed ? '' : ' muted'}">${placed ? R(s.score) : '—'}</div>
-        <div class="muted" style="font-size:13px">${placed ? `Peak ${R(s.peakScore)} RP · ${rankOf(s.peakScore).label}${s.lastScore != null ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}` : s.games ? 'Shown once placed' : 'Play a friendly to start'}</div>
+        <div class="muted" style="font-size:13px">${placed ? (s.lastScore != null ? `Last battle <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : 'No change yet') : s.games ? 'Shown once placed' : 'Play a friendly to start'}</div>
         <div class="muted srange" title="${SR_HELP}">Skill range <b class="num">${skillRange(s)}</b><span class="hide-sm"> · centre ${R(s.r)}</span></div></div>
       ${w ? `<div class="tools">
         <button class="btn small" type="button" data-act="log" data-id="${esc(id)}">Log a match</button>
@@ -746,8 +752,8 @@ function viewPlayer(id, data, L, view) {
   </section>
   <div class="grid2">
     <section class="panel">
-      <div class="panel-h"><h2>Skill history</h2>${best ? `<span class="muted" style="font-size:13px">Best win: ${esc(data.players[best.oppId].name)} at ${R(best.r)} skill</span>` : ''}</div>
-      <div class="panel-b">${ratingChart(chartPts)}<p class="muted chart-note">The band is the skill range; its lower edge is RP. The line is the centre of the range. Dashed lines are season resets.</p></div>
+      <div class="panel-h"><h2>RP and skill history</h2>${placed ? `<span class="muted" style="font-size:13px">Peak <b class="num">${R(s.peakScore)}</b> RP · ${rankOf(s.peakScore).label}${bestEver ? ` · all-time best <span class="chip ${bestEver.cls}">${bestEver.label}</span>` : ''}</span>` : bestEver ? `<span class="muted" style="font-size:13px">All-time best <span class="chip ${bestEver.cls}">${bestEver.label}</span></span>` : ''}</div>
+      <div class="panel-b">${ratingChart(chartPts)}<p class="muted chart-note"><span class="lg rp"></span>RP, dashed while unplaced · <span class="lg band"></span>skill range with its centre line · vertical dashes are season resets.${best ? ` Best win: ${esc(data.players[best.oppId].name)} at ${R(best.r)} skill.` : ''}</p></div>
     </section>
     <section class="panel">
       <div class="panel-h"><h2>Head to head</h2></div>
@@ -1056,11 +1062,11 @@ function viewAbout(data) {
     ['Can I put this on my home screen?', 'Yes. On iPhone, open it in Safari, tap Share, then <b>Add to Home Screen</b>. On Android or desktop Chrome, use <b>Install app</b> from the browser menu. It opens full-screen like a regular app.'],
     ['Is the rating system actually any good?', 'Check the <a href="#lab">Lab</a>. It replays every rated battle and scores the win predictions against what actually happened, and compares them to plain Elo.'],
   ];
+  const D = DIVISION_RP;
   const rankRows = RANKS.slice().reverse().map((k, i) => {
-    const top = i === 0;
-    const divs = top ? `${k.min}+ RP` : `III ${k.min}–${k.min + 24} · II ${k.min + 25}–${k.min + 49} · I ${k.min + 50}–${k.min + 74}`;
-    const wood = i === RANKS.length - 1;
-    return `<li><span class="chip ${k.cls}">${k.name}</span><span class="muted num">${wood ? `III under ${k.min + 25} · II ${k.min + 25}–${k.min + 49} · I ${k.min + 50}–${k.min + 74}` : divs}</span></li>`;
+    const top = i === 0, wood = i === RANKS.length - 1;
+    const divs = top ? `${k.min}+ RP` : `III ${wood ? `under ${k.min + D}` : `${k.min}–${k.min + D - 1}`} · II ${k.min + D}–${k.min + 2 * D - 1} · I ${k.min + 2 * D}–${k.min + 3 * D - 1}`;
+    return `<li><span class="chip ${k.cls}">${k.name}</span><span class="muted num">${divs}</span></li>`;
   }).join('');
   return `<section class="panel about-hero"><div class="panel-b">
       <div class="eyebrow">About</div>
@@ -1090,7 +1096,7 @@ function viewAbout(data) {
     <li>Win chances come from both players' skill ranges, so two wide ranges pull the odds toward 50/50. An <b>Upset</b> is a win the system gave under 35%.</li>
     <li>Nothing is stored as a rating. Everything is recalculated from the full match history, so fixing an old match fixes everything after it.</li>
   </ul></div></section>
-  <section class="panel"><div class="panel-h"><h2>Ranks</h2><span class="muted" style="font-size:13px">By RP. Each rank below Champion has three divisions, III up to I</span></div><div class="panel-b"><ul class="rank-list">${rankRows}</ul></div></section>
+  <section class="panel"><div class="panel-h"><h2>Ranks</h2><span class="muted" style="font-size:13px">By RP. Each rank below Champion spans ${3 * DIVISION_RP} RP in three divisions, III up to I</span></div><div class="panel-b"><ul class="rank-list">${rankRows}</ul></div></section>
   <section class="panel"><div class="panel-h"><h2>What's on each page</h2></div><div class="panel-b"><dl class="about-pages">
     <div><dt><a href="#standings">Standings</a></dt><dd>The table: RP, rank, record, streak and recent form. Tap a player for their profile, skill history, decks and head-to-heads.</dd></div>
     <div><dt><a href="#matches">Matches</a></dt><dd>Every battle, newest first. Tap one for decks, tower HP and how much RP each player won or lost.</dd></div>

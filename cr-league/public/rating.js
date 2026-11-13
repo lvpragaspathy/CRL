@@ -291,16 +291,11 @@ export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), 
 /* ---------- presentation helpers ---------- */
 /* ---------- ranks ---------- */
 /** Ranked Points (RP) = rating − 2·RD: the rating the system is about 95% sure a player is above. */
-export const RANKS = [
-  { name: 'Wood', cls: 't-wood', min: 1050 },
-  { name: 'Bronze', cls: 't-bronze', min: 1125 },
-  { name: 'Silver', cls: 't-silver', min: 1200 },
-  { name: 'Gold', cls: 't-gold', min: 1275 },
-  { name: 'Platinum', cls: 't-plat', min: 1350 },
-  { name: 'Diamond', cls: 't-diamond', min: 1425 },
-  { name: 'Champion', cls: 't-champ', min: 1500 },
-];
-export const DIVISION_RP = 25;          // each rank below Champion has three divisions: III, II, I
+export const DIVISION_RP = 50;          // each rank below Champion has three divisions: III, II, I
+export const RANK_SPAN = DIVISION_RP * 3;
+export const CHAMPION_RP = 1500;       // 95% sure you're above the starting rating
+const NAMES = [['Wood', 't-wood'], ['Bronze', 't-bronze'], ['Silver', 't-silver'], ['Gold', 't-gold'], ['Platinum', 't-plat'], ['Diamond', 't-diamond'], ['Champion', 't-champ']];
+export const RANKS = NAMES.map(([name, cls], i) => ({ name, cls, min: CHAMPION_RP - (NAMES.length - 1 - i) * RANK_SPAN }));
 const ROMAN = ['', 'I', 'II', 'III'];
 /** A player is placed once the system is reasonably sure of their rating. Until then RP is hidden. */
 export const isPlaced = s => s.games > 0 && s.rd <= PROVISIONAL_RD;

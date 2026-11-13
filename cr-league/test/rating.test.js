@@ -150,20 +150,22 @@ test('pre-game ratings are the real "before" values for back-to-back games', () 
   assert.equal(v.st.x.lastScore, null, 'but no delta is shown while unplaced');
 });
 
-test('ranks: divisions are 25 RP wide, Wood is the floor, Champion has no divisions', () => {
+test('ranks: divisions are 50 RP wide, Wood is the floor, Champion has no divisions', () => {
   assert.equal(rankOf(1500).label, 'Champion');
   assert.equal(rankOf(1499).label, 'Diamond I');
-  assert.equal(rankOf(1425).label, 'Diamond III');
-  assert.equal(rankOf(1424).label, 'Platinum I');
-  assert.equal(rankOf(1350).label, 'Platinum III');
-  assert.equal(rankOf(1300).label, 'Gold II');
-  assert.equal(rankOf(1200).label, 'Silver III');
-  assert.equal(rankOf(1125).label, 'Bronze III');
-  assert.equal(rankOf(1124).label, 'Wood I');
-  assert.equal(rankOf(1050).label, 'Wood III');
-  assert.equal(rankOf(900).label, 'Wood III', 'nothing below Wood III');
-  assert.ok(rankOf(1500).ord > rankOf(1499).ord && rankOf(1125).ord > rankOf(1124).ord, 'ord climbs with RP');
-  assert.equal(rankOf(1300).next, 1325, 'next division starts at the next 25');
+  assert.equal(rankOf(1450).label, 'Diamond I');
+  assert.equal(rankOf(1449).label, 'Diamond II');
+  assert.equal(rankOf(1350).label, 'Diamond III');
+  assert.equal(rankOf(1349).label, 'Platinum I');
+  assert.equal(rankOf(1200).label, 'Platinum III');
+  assert.equal(rankOf(1100).label, 'Gold II');
+  assert.equal(rankOf(900).label, 'Silver III');
+  assert.equal(rankOf(750).label, 'Bronze III');
+  assert.equal(rankOf(749).label, 'Wood I');
+  assert.equal(rankOf(600).label, 'Wood III');
+  assert.equal(rankOf(300).label, 'Wood III', 'nothing below Wood III');
+  assert.ok(rankOf(1500).ord > rankOf(1499).ord && rankOf(750).ord > rankOf(749).ord, 'ord climbs with RP');
+  assert.equal(rankOf(1100).next, 1150, 'next division starts at the next 50');
   assert.equal(RANKS.length, 7);
 });
 
