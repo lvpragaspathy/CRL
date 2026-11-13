@@ -1,5 +1,5 @@
 import {
-  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, battlesToPlace, projectedRp, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
+  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, modeFamily, ownDeck, modeRecords, battlesToPlace, projectedRp, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
 } from './rating.js';
 import {
   hpInfo, clutch, leaks, tilt, heatmap, meta, race, records, weekly, scorePreds, calibration, eloPreds, tune, GRID, archetype,
@@ -526,7 +526,7 @@ function rivalryPanel(data, L, view) {
   const rec = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
   // Deck matchups: A's deck type vs B's deck type
   const mu = new Map();
-  for (const m of all) {
+  for (const m of all.filter(ownDeck)) {   // mirror/draft decks aren't a matchup either player chose
     const aSide = m.a === A.id ? 'a' : 'b';
     const da = aSide === 'a' ? m.deckA : m.deckB, db = aSide === 'a' ? m.deckB : m.deckA;
     if (!da?.cards?.length || !db?.cards?.length) continue;
@@ -670,9 +670,21 @@ function matchDetail(id) {
   openDlg('Battle details', body, foot, form => { form.closest('dialog').classList.add('wide'); });
 }
 
+const FAMILY_HELP = { Classic: 'Bring your own deck: Classic and other standard modes', Mirror: 'Both players use the same deck', Draft: 'Decks built from offered cards: Draft, Pick and Chaos modes' };
+function modesSection(id, view) {
+  const rows = modeRecords(id, view);
+  if (rows.length < 2) return '';   // one mode is just the overall record again
+  return `<section class="panel"><div class="panel-h"><h2>By game mode</h2></div><div class="panel-b table-wrap"><table class="compact modes">
+    <thead><tr><th>Mode</th><th class="r hide-sm">Battles</th><th>W-L</th><th class="r">Win %</th><th class="r" title="RP won or lost in this mode, placement games excluded">RP ±</th></tr></thead><tbody>
+    ${rows.map(o => `<tr><td class="wrap"><b title="${FAMILY_HELP[o.family]}">${o.family}</b><span class="mode-list muted">${o.modes.map(([n, c]) => `${esc(n)} ${c}`).join(' · ')}</span></td>
+      <td class="num r hide-sm">${o.n}</td><td class="num">${o.w}-${o.l}${o.d ? '-' + o.d : ''}</td><td class="num r ${o.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(o.rate)}</td><td class="num r ${dCls(o.rp)}">${Math.round(o.rp) ? fmtD(o.rp) : '—'}</td></tr>`).join('')}
+    </tbody></table></div></section>`;
+}
 function cardsSection(id, data, view) {
-  const cs = cardStats(id, view.ms);
-  if (!cs.games) return `<section class="panel"><div class="panel-h"><h2>Decks and cards</h2></div><div class="panel-b"><p class="muted" style="margin:0">No deck data ${S.season === 'all' ? '' : 'this season '}yet. Decks are captured from auto-imported battles, so this fills in as you play friendlies.</p></div></section>`;
+  const mine = view.ms.filter(m => m.a === id || m.b === id);
+  const cs = cardStats(id, mine.filter(ownDeck)), skipped = mine.length - mine.filter(ownDeck).length;
+  const skipNote = skipped ? ` · ${skipped} mirror and draft battle${skipped === 1 ? '' : 's'} not counted` : '';
+  if (!cs.games) return `<section class="panel"><div class="panel-h"><h2>Decks and cards</h2></div><div class="panel-b"><p class="muted" style="margin:0">${skipped ? `No own-deck battles ${S.season === 'all' ? '' : 'this season '}yet. Deck and card stats only count modes where you bring your own deck (like Classic): mirror and draft decks aren't anyone's pick, so ${skipped} battle${skipped === 1 ? '' : 's'} here ${skipped === 1 ? "isn't" : "aren't"} counted.` : `No deck data ${S.season === 'all' ? '' : 'this season '}yet. Decks are captured from auto-imported battles.`}</p></div></section>`;
   const minN = cs.games >= 15 ? 3 : 2;
   const vs = cs.vs.filter(v => v.n >= minN);
   const worst = vs.slice().sort((a, b) => a.rate - b.rate || b.n - a.n).filter(v => v.rate < 0.5).slice(0, 5);
@@ -680,7 +692,7 @@ function cardsSection(id, data, view) {
   const rec = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
   const matchup = (list, empty) => list.length ? list.map(v => `<li>${cardTile(v.card, ' sm')}<span class="mn">${esc(v.card.name)}</span><span class="muted num">${rec(v)}</span><span class="num ${v.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(v.rate)}</span></li>`).join('') : `<li class="muted">${empty}</li>`;
   return `<section class="panel">
-    <div class="panel-h"><h2>Decks and cards</h2><span class="muted" style="font-size:13px">From ${cs.games} battle${cs.games === 1 ? '' : 's'} with deck data</span></div>
+    <div class="panel-h"><h2>Decks and cards</h2><span class="muted" style="font-size:13px" title="Mirror decks are the same for both players and draft decks are built from offered cards, so only battles where you bring your own deck count here.">From ${cs.games} own-deck battle${cs.games === 1 ? '' : 's'}${skipNote}</span></div>
     <div class="panel-b cards-b">
       <div class="godecks">
         <h3 class="sub">Go-to decks</h3>
@@ -783,6 +795,7 @@ function viewPlayer(id, data, L, view) {
       }).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No battles in this view.</p>'}</div>
     </section>
   </div>
+  ${modesSection(id, view)}
   ${cardsSection(id, data, view)}
   <section class="panel">
     <div class="panel-h"><h2>Recent battles</h2><span class="muted" style="font-size:13px">${mine.length} in this view</span></div>
@@ -893,7 +906,7 @@ function viewStats(data, L, view) {
       <div class="table-wrap"><h3 class="sub">Most played cards</h3><table class="ctable compact"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
         ${mt.cards.slice(0, 12).map(c => `<tr><td><span class="cname">${cardTile(c.card, ' sm')}<span>${esc(c.card.name)}</span></span></td><td class="r"><span class="usebar"><i style="width:${Math.round(c.usage * 100)}%"></i></span><span class="num">${fmtPct(c.usage)}</span></td><td class="r num ${c.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(c.rate)}</td></tr>`).join('')}
       </tbody></table></div>
-    </div><p class="muted chart-note">From ${mt.decks} decks in auto-imported battles. Archetypes are named by their win conditions.</p>` : '<p class="muted" style="margin:0">Deck data fills in from auto-imported battles.</p>';
+    </div><p class="muted chart-note">From ${mt.decks} decks in ${mt.battles} own-deck battles${mt.skipped ? ` (${mt.skipped} mirror and draft battles left out, since nobody picked those decks)` : ''}. Archetypes are named by their win conditions.</p>` : `<p class="muted" style="margin:0">${mt.skipped ? `No own-deck battles in this view. The meta only counts modes where players bring their own deck; ${mt.skipped} mirror and draft battles are left out.` : 'Deck data fills in from auto-imported battles.'}</p>`;
 
   return seasonBar(L) + `
   <section class="panel recap-panel">

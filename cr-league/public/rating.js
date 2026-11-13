@@ -333,6 +333,35 @@ export function ranking(data, view) {
 }
 export const pct = s => (s.games ? Math.round((100 * (s.w + 0.5 * s.d)) / s.games) + '%' : '—');
 
+/* ---------- game modes ---------- */
+/**
+ * Battle modes fall into three families. Only "Classic" (and other bring-your-own-deck modes like Triple Elixir
+ * or Sudden Death) says anything about the decks people choose: Mirror gives both players the same deck and
+ * Draft / Pick / Chaos builds it from offered cards, so those stay out of deck and card stats.
+ */
+export const MODE_FAMILIES = ['Classic', 'Mirror', 'Draft'];
+export function modeFamily(mode) {
+  const m = String(mode || '');
+  if (/mirror/i.test(m)) return 'Mirror';
+  if (/draft|pick|chaos|random/i.test(m)) return 'Draft';
+  return 'Classic';
+}
+export const ownDeck = m => modeFamily(m.mode) === 'Classic';
+/** W/L/D, battles and RP change per mode family (and the exact mode names in each) for one player. */
+export function modeRecords(pid, view) {
+  const out = new Map();
+  for (const m of view.ms) {
+    const side = m.a === pid ? 'a' : m.b === pid ? 'b' : null; if (!side) continue;
+    const fam = modeFamily(m.mode);
+    const o = out.get(fam) || { family: fam, n: 0, w: 0, l: 0, d: 0, rp: 0, modes: new Map() };
+    o.n++; o[m.winner === 'draw' ? 'd' : m.winner === side ? 'w' : 'l']++;
+    const d = view.delta[m.id], rpd = d && (side === 'a' ? d.rpA : d.rpB); if (rpd != null) o.rp += rpd;
+    const name = m.mode || 'Unknown'; o.modes.set(name, (o.modes.get(name) || 0) + 1);
+    out.set(fam, o);
+  }
+  return MODE_FAMILIES.filter(f => out.has(f)).map(f => { const o = out.get(f); return { ...o, rate: (o.w + 0.5 * o.d) / o.n, modes: [...o.modes].sort((a, b) => b[1] - a[1]) }; });
+}
+
 /* ---------- deck + card stats ---------- */
 export const avgElixir = deck => {
   const xs = (deck?.cards || []).map(c => c.elixir).filter(Number.isFinite);

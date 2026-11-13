@@ -1,5 +1,5 @@
 // Derived stats for the Stats and Lab tabs. Pure functions over the league data + computeLeague output.
-import { seasonKey, seasonStart, nextSeasonKey, backtest, prepareLeague, DEFAULT_PARAMS } from './rating.js';
+import { seasonKey, seasonStart, nextSeasonKey, backtest, prepareLeague, DEFAULT_PARAMS, ownDeck } from './rating.js';
 
 export const CLOSE_HP = 1500;          // a 1-crown game is "close" if the winner's HP edge was at most this
 export const SESSION_GAP_MIN = 45;     // a gap longer than this starts a new session
@@ -115,7 +115,9 @@ export function archetype(deck) {
 export function meta(data, view) {
   const cards = new Map(), arch = new Map();
   let decks = 0;
-  for (const m of view.ms) {
+  // Mirror and draft decks aren't anyone's choice, so the meta only counts bring-your-own-deck battles.
+  const ms = view.ms.filter(ownDeck);
+  for (const m of ms) {
     for (const side of ['a', 'b']) {
       const deck = side === 'a' ? m.deckA : m.deckB, id = m[side];
       if (!deck?.cards?.length) continue;
@@ -132,7 +134,7 @@ export function meta(data, view) {
   }
   const list = map => [...map.values()].map(o => ({ ...o, rate: score(o), usage: decks ? o.n / decks : 0 }));
   return {
-    decks,
+    decks, battles: ms.length, skipped: view.ms.length - ms.length,
     cards: list(cards).sort((a, b) => b.n - a.n || b.rate - a.rate),
     archetypes: list(arch).sort((a, b) => b.n - a.n || b.rate - a.rate)
       .map(a => ({ ...a, mains: Object.entries(a.players).sort((x, y) => y[1] - x[1]).map(([pid, n]) => ({ pid, n })) })),
