@@ -814,7 +814,7 @@ function viewStats(data, L, view) {
       <canvas id="recapCanvas" width="1080" height="1350" aria-label="Weekly recap image"></canvas>
       <div class="recap-side">
         <p class="muted" style="margin:0">A shareable image of the last 7 days: battles, the biggest climber, most wins, the upset of the week and the top 5.</p>
-        <div class="actions"><button class="btn primary" type="button" data-act="recap-dl">Download image</button><button class="btn" type="button" data-act="recap-copy" id="recapCopy">Copy image</button></div>
+        <div class="actions"><button class="btn primary" type="button" data-act="recap-dl">${TOUCH.matches && navigator.canShare ? 'Save or share image' : 'Download image'}</button><button class="btn" type="button" data-act="recap-copy" id="recapCopy">Copy image</button></div>
       </div>
     </div>
   </section>
@@ -888,8 +888,16 @@ async function drawRecap(data, L) {
   x.fillStyle = '#8e9bc1'; x.font = `500 24px ${BODY}`; x.fillText(location.host || 'friendly battle league', 70, H - 50);
   const copy = document.getElementById('recapCopy');
   if (copy && !(window.ClipboardItem && navigator.clipboard?.write)) copy.hidden = true;
+  recapReady = null; recapBlob().then(b => { recapReady = b; });
 }
-function recapBlob() { return new Promise(res => document.getElementById('recapCanvas')?.toBlob(res, 'image/png') ?? res(null)); }
+// toBlob returns nothing and calls back later, so it can't be chained with ?? (that resolved null every time).
+function recapBlob() {
+  const cv = document.getElementById('recapCanvas');
+  return new Promise(res => (cv ? cv.toBlob(res, 'image/png') : res(null)));
+}
+// Made ahead of time: iOS only opens the share sheet straight from a tap, not after waiting on the image.
+let recapReady = null;
+const TOUCH = window.matchMedia('(pointer:coarse)');
 
 /* ---------- Lab tab ---------- */
 function calibrationChart(cal) {
@@ -1431,13 +1439,23 @@ document.addEventListener('click', async e => {
   }
   if (act === 'more') { S.matchLimit += 50; render(); return; }
   if (act === 'recap-dl') {
-    const blob = await recapBlob(); if (!blob) return;
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = `recap-${new Date().toISOString().slice(0, 10)}.png`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000); return;
+    const blob = recapReady || await recapBlob();
+    if (!blob) { toast("Couldn't make the image. Try reloading the page."); return; }
+    const name = `recap-${new Date().toLocaleDateString('en-CA')}.png`; // en-CA gives YYYY-MM-DD in local time
+    // Phones: the share sheet (Save Image, Messages, ...). A download link does nothing in an iPhone home-screen app.
+    const file = new File([blob], name, { type: 'image/png' });
+    if (TOUCH.matches && navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Weekly recap' }); return; }
+      catch (err) { if (err.name === 'AbortError') return; /* otherwise fall through to a download */ }
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000); return;
   }
   if (act === 'recap-copy') {
-    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': recapBlob() })]); toast('Recap image copied. Paste it in the group chat.'); }
+    // Hand over the finished image when we have it (Chrome can stall on a still-pending one); Safari needs write() called
+    // right away in the tap, which the pending-promise form allows when it isn't ready yet.
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': recapReady || recapBlob() })]); toast('Recap image copied. Paste it in the group chat.'); }
     catch { toast("Couldn't copy the image here. Use Download instead."); }
     return;
   }
