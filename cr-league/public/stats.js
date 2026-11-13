@@ -1,5 +1,5 @@
 // Derived stats for the Stats and Lab tabs. Pure functions over the league data + computeLeague output.
-import { seasonKey, seasonStart, nextSeasonKey, backtest, prepareLeague, DEFAULT_PARAMS, PROVISIONAL_RD } from './rating.js';
+import { seasonKey, seasonStart, nextSeasonKey, backtest, prepareLeague, DEFAULT_PARAMS } from './rating.js';
 
 export const CLOSE_HP = 1500;          // a 1-crown game is "close" if the winner's HP edge was at most this
 export const SESSION_GAP_MIN = 45;     // a gap longer than this starts a new session
@@ -140,11 +140,12 @@ export function meta(data, view) {
 }
 
 /* ---------- season race ---------- */
-/** Rating lines for everyone who played in a season (or all time), each starting at the season's opening rating. */
+/** RP lines for everyone who played in a season (or all time), each starting at the season's opening RP. */
 export function race(data, L, key, tz) {
   const isAll = key === 'all';
   const start = isAll ? (L.all.ms[0]?.playedAt ?? Date.now()) : seasonStart(key, tz);
   const end = isAll ? Date.now() : Math.min(Date.now(), seasonStart(nextSeasonKey(key), tz));
+  const rp = e => e.r - 2 * e.rd;
   const series = [];
   for (const id in L.timeline) {
     const p = data.players[id]; if (!p || p.archived) continue;
@@ -152,10 +153,10 @@ export function race(data, L, key, tz) {
     const games = tl.filter(e => !e.reset && (isAll || e.season === key));
     if (!games.length) continue;
     let pts;
-    if (isAll) pts = [{ t: start, r: 1500 }, ...tl.map(e => ({ t: e.t ?? seasonStart(e.season, tz), r: e.r }))];
+    if (isAll) pts = [{ t: start, r: 1500 - 2 * 350 }, ...tl.map(e => ({ t: e.t ?? seasonStart(e.season, tz), r: rp(e) }))];
     else {
       const reset = tl.find(e => e.reset && e.season === key);
-      pts = [{ t: start, r: reset ? reset.r : 1500 }, ...games.map(e => ({ t: e.t, r: e.r }))];
+      pts = [{ t: start, r: reset ? rp(reset) : 1500 - 2 * 350 }, ...games.map(e => ({ t: e.t, r: rp(e) }))];
     }
     pts.push({ t: end, r: pts[pts.length - 1].r });
     series.push({ id, pts, last: pts[pts.length - 1].r });
@@ -198,27 +199,26 @@ export function records(data, L, tz) {
     add({ key: 'upset', title: 'Biggest upset', value: `${Math.round(up.p * 100)}% chance`, who: [w], vs: l, when: up.m.playedAt, matchId: up.m.id });
   }
 
-  // Biggest single-game gain. Placement games (high RD) swing hard by design, so they don't count.
-  const settled = (dl, side) => (side === 'a' ? dl.preRdA : dl.preRdB) <= PROVISIONAL_RD;
+  // Biggest single-game RP gain. Placement games swing hard by design, so they don't count (rpA/rpB are null there).
   let gain = null;
   for (const m of ms) {
     const dl = deltas[m.id]; if (!dl || dl.a == null) continue;
-    for (const [side, d] of [['a', dl.a], ['b', dl.b]]) if (settled(dl, side) && (!gain || d > gain.d)) gain = { d, id: m[side], m };
+    for (const [side, d] of [['a', dl.rpA], ['b', dl.rpB]]) if (d != null && (!gain || d > gain.d)) gain = { d, id: m[side], m };
   }
-  if (gain && gain.d > 0) add({ key: 'gain', title: 'Biggest single-game gain', value: `+${Math.round(gain.d)}`, who: [gain.id], vs: gain.m.a === gain.id ? gain.m.b : gain.m.a, when: gain.m.playedAt, matchId: gain.m.id });
+  if (gain && gain.d > 0) add({ key: 'gain', title: 'Biggest single-game gain', value: `+${Math.round(gain.d)} RP`, who: [gain.id], vs: gain.m.a === gain.id ? gain.m.b : gain.m.a, when: gain.m.playedAt, matchId: gain.m.id });
 
-  // Best day (net rating) and busiest day (battles)
+  // Best day (net RP) and busiest day (battles)
   const days = {};
   for (const m of ms) {
     const dl = deltas[m.id], k = dayKey(m.playedAt);
     for (const side of ['a', 'b']) {
       const o = days[m[side] + '|' + k] || (days[m[side] + '|' + k] = { id: m[side], day: k, net: 0, n: 0, t: m.playedAt });
-      o.n++; if (dl && dl[side] != null && settled(dl, side)) o.net += dl[side];
+      o.n++; const rd = dl && (side === 'a' ? dl.rpA : dl.rpB); if (rd != null) o.net += rd;
     }
   }
   const dl = Object.values(days);
   const bestDay = dl.slice().sort((a, b) => b.net - a.net)[0];
-  if (bestDay && bestDay.net > 0) add({ key: 'day', title: 'Best single day', value: `+${Math.round(bestDay.net)} in ${bestDay.n} battle${bestDay.n === 1 ? '' : 's'}`, who: [bestDay.id], when: bestDay.t });
+  if (bestDay && bestDay.net > 0) add({ key: 'day', title: 'Best single day', value: `+${Math.round(bestDay.net)} RP in ${bestDay.n} battle${bestDay.n === 1 ? '' : 's'}`, who: [bestDay.id], when: bestDay.t });
   const busy = dl.slice().sort((a, b) => b.n - a.n)[0];
   if (busy && busy.n >= 3) add({ key: 'busy', title: 'Most battles in a day', value: `${busy.n} battles`, who: [busy.id], when: busy.t });
 
@@ -262,7 +262,7 @@ export function weekly(data, L, now = Date.now()) {
     for (const side of ['a', 'b']) {
       const id = m[side], res = resultFor(m, side);
       const o = per[id] || (per[id] = { id, ...blank(), net: 0 });
-      o.n++; o[res]++; if (dl && dl[side] != null) o.net += dl[side];
+      o.n++; o[res]++; const rd = dl && (side === 'a' ? dl.rpA : dl.rpB); if (rd != null) o.net += rd;
     }
     if (dl && m.ranked && m.winner !== 'draw') {
       const p = m.winner === 'a' ? dl.pA : 1 - dl.pA;

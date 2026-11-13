@@ -1,5 +1,5 @@
 import {
-  START_R, MIN_CHAMP_GAMES, computeLeague, tier, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
+  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
 } from './rating.js';
 import {
   hpInfo, clutch, leaks, tilt, heatmap, meta, race, records, weekly, scorePreds, calibration, eloPreds, tune, GRID, archetype,
@@ -7,6 +7,7 @@ import {
 } from './stats.js';
 
 /* ---------- constants ---------- */
+const PLACEMENT_HINT = '8';   // battles to get placed the first time (about 3 after each season reset)
 const MODES = ['Classic', 'Triple Elixir', 'Draft', 'Sudden Death', 'Mega Deck', 'Other'];
 const COLORS = ['#4a90ff', '#ff5367', '#ffc63a', '#3fd68f', '#b783ff', '#ff8a3d', '#2fd3e0', '#ff74be'];
 const CROWN = '<svg class="crown" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/><rect x="4" y="17" width="16" height="2.5" rx="1"/></svg>';
@@ -162,7 +163,7 @@ function spark(vals, w = 76, h = 28) {
   const pts = v.map((y, i) => [2 + (i / (v.length - 1)) * (w - 6), h / 2 - ((y - mid) / span) * (h - 8)]);
   const d = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join('');
   const L = pts[pts.length - 1], up = v[v.length - 1] >= v[0];
-  return `<svg class="spark ${up ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Rating trend, last ${v.length} rated matches"><path class="sa" d="${d}L${L[0].toFixed(1)} ${h}L2 ${h}Z"/><path class="sl" d="${d}"/><circle cx="${L[0].toFixed(1)}" cy="${L[1].toFixed(1)}" r="2.6"/></svg>`;
+  return `<svg class="spark ${up ? 'up' : 'down'}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="RP trend, last ${v.length} rated matches"><path class="sa" d="${d}L${L[0].toFixed(1)} ${h}L2 ${h}Z"/><path class="sl" d="${d}"/><circle cx="${L[0].toFixed(1)}" cy="${L[1].toFixed(1)}" r="2.6"/></svg>`;
 }
 
 // SVG charts scale with their box, so on a phone a 760-wide chart shrinks its labels to ~5px.
@@ -170,14 +171,16 @@ function spark(vals, w = 76, h = 28) {
 const PHONE_MQ = window.matchMedia('(max-width:560px)');
 const narrow = () => PHONE_MQ.matches;
 
-/** Rating over every rated game across seasons: the line is the rating, the band is ±RD, dashed lines mark season resets. */
+/** RP and skill over every rated game across seasons: the gold line is RP (dashed while unplaced), the thin line the centre of the
+ *  skill range, the band the range itself. Scaled so every RP and centre point fits; only the band's upper edge may clip. */
 function ratingChart(points) {
   const W = narrow() ? 380 : 640, H = narrow() ? 220 : 240, l = 42, r = 14, t = 14, b = 30;
-  if (points.length < 2) return '<p class="muted" style="margin:0">The rating chart shows up after the first rated match.</p>';
-  const rs = points.map(p => p.r);
-  const mnV = Math.min(...rs), mxV = Math.max(...rs);
+  if (points.length < 2) return '<p class="muted" style="margin:0">The chart shows up after the first rated match.</p>';
+  const rp = p => p.r - 2 * p.rd;
+  const vals = points.flatMap(p => [p.r, rp(p)]);
+  const mnV = Math.min(...vals), mxV = Math.max(...vals);
   const step = (mxV - mnV) > 400 ? 100 : 50;
-  let lo = Math.floor((mnV - 40) / step) * step, hi = Math.ceil((mxV + 40) / step) * step;
+  let lo = Math.floor((mnV - 30) / step) * step, hi = Math.ceil((mxV + 30) / step) * step;
   if (hi - lo < step * 3) { lo -= step; hi += step; }
   const n = points.length - 1;
   const x = i => l + (i / n) * (W - l - r);
@@ -185,22 +188,26 @@ function ratingChart(points) {
   let g = '';
   for (let v = lo; v <= hi; v += step) g += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
   const base = START_R > lo && START_R < hi ? `<line class="base" x1="${l}" x2="${W - r}" y1="${y(START_R)}" y2="${y(START_R)}"/>` : '';
-  const line = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r).toFixed(1)).join('');
+  const centre = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r).toFixed(1)).join('');
+  // The RP line is split into placed (solid) and unplaced (dashed) runs.
+  const seg = (want) => { let d = '', pen = false; points.forEach((p, i) => { const on = (p.rd <= PROVISIONAL_RD) === want; if (on || (pen && i > 0)) d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(rp(p)).toFixed(1); pen = on; }); return d; };
   const upper = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p.r + 2 * p.rd).toFixed(1)).join('');
-  const lower = points.map((p, i) => 'L' + x(n - i).toFixed(1) + ' ' + y(points[n - i].r - 2 * points[n - i].rd).toFixed(1)).join('');
+  const lower = points.map((p, i) => 'L' + x(n - i).toFixed(1) + ' ' + y(rp(points[n - i])).toFixed(1)).join('');
   const seasons = points.map((p, i) => p.reset ? `<line class="sline" x1="${x(i).toFixed(1)}" x2="${x(i).toFixed(1)}" y1="${t}" y2="${H - b}"/><text class="slabel" x="${(x(i) + 4).toFixed(1)}" y="${t + 10}">${esc(seasonLabel(p.season, true).split(' ')[0])}</text>` : '').join('');
   const last = points[n];
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating history over ${n} points, now ${R(last.r)} plus or minus ${R(last.rd)}">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="RP and skill history over ${n} points, now ${R(rp(last))} RP, skill ${R(rp(last))} to ${R(last.r + 2 * last.rd)}">
     <defs>
       <clipPath id="plot"><rect x="${l}" y="${t}" width="${W - l - r}" height="${H - t - b}"/></clipPath>
     </defs>
     ${g}${base}
     <g clip-path="url(#plot)"><path class="band" d="${upper}${lower}Z"/></g>
     ${seasons}
-    <path class="line" d="${line}"/>
-    <circle class="end" cx="${x(n).toFixed(1)}" cy="${y(last.r).toFixed(1)}" r="5"/>
-    <text x="${l}" y="${H - 8}">Start</text>
-    <text x="${W - r}" y="${H - 8}" text-anchor="end">Now · ±${R(last.rd)}</text>
+    <path class="line centre" d="${centre}"/>
+    <path class="line rp unplaced" d="${seg(false)}"/>
+    <path class="line rp" d="${seg(true)}"/>
+    <circle class="end" cx="${x(n).toFixed(1)}" cy="${y(rp(last)).toFixed(1)}" r="5"/>
+    <text x="${l}" y="${H - 8}">First battle</text>
+    <text x="${W - r}" y="${H - 8}" text-anchor="end">Now · ${R(rp(last))} RP</text>
   </svg>`;
 }
 
@@ -228,13 +235,13 @@ function matchRow(m, data, view) {
   const hp = hpInfo(m);
   const lA = m.stats?.a?.leaked, lB = m.stats?.b?.leaked;
   const detail = [hp ? `Towers left: ${hp.hpA.toLocaleString()} vs ${hp.hpB.toLocaleString()} HP` : '', Number.isFinite(lA) && Number.isFinite(lB) ? `Elixir leaked: ${lA.toFixed(1)} vs ${lB.toFixed(1)}` : ''].filter(Boolean).join(' · ');
-  const side = (p, cls, won, d) => `<div class="side ${cls}${won ? ' won' : ''}">
-      ${cls === 'b' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
+  const side = (p, cls, won, d) => { const mv = moveChip(rankMove(dl, cls)); return `<div class="side ${cls}${won ? ' won' : ''}">
+      ${cls === 'b' ? mv : ''}${cls === 'b' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
       ${won && cls === 'b' ? CROWN : ''}
       <a href="#p-${esc(p.id)}">${esc(p.name)}</a>
       ${won && cls === 'a' ? CROWN : ''}
-      ${cls === 'a' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
-    </div>`;
+      ${cls === 'a' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}${cls === 'a' ? mv : ''}
+    </div>`; };
   const acts = `<div class="row-acts">
       <button class="iconbtn" type="button" data-act="details" data-id="${esc(m.id)}" aria-label="Battle details">${ICON_OPEN}</button>
       ${writable() ? `<button class="iconbtn hide-sm" type="button" data-act="edit-match" data-id="${esc(m.id)}" aria-label="Edit match">${ICON_EDIT}</button>
@@ -242,14 +249,14 @@ function matchRow(m, data, view) {
   const decks = (m.deckA || m.deckB) ? `<div class="decks"><div class="deck-strip a">${deckHtml(m.deckA)}</div><div class="deck-strip b">${deckHtml(m.deckB)}</div></div>` : '';
   return `<div class="match" data-match="${esc(m.id)}">
     <div class="when"><b>${esc(when.day)}${m.source === 'api' ? '<span class="auto" title="Imported from the Clash Royale battle log">Auto</span>' : ''}</b>${esc(when.time)} · ${esc(m.mode)}${m.ranked ? '' : ' · <span class="unranked">unrated</span>'}${m.notes ? `<br>${esc(m.notes)}` : ''}</div>
-    ${side(A, 'a', m.winner === 'a', dl.a)}
+    ${side(A, 'a', m.winner === 'a', dl.rpA)}
     <div class="score-wrap"${detail ? ` title="${esc(detail)}"` : ''}>
       <div class="score num"><span class="a">${m.ca}</span><span class="dash">–</span><span class="b">${m.cb}</span></div>
       ${upset ? `<div class="score-note upset" title="The winner had a ${fmtPct(pWin)} chance before the match">Upset · ${fmtPct(pWin)}</div>` : tieNote ? `<div class="score-note">${tieNote}</div>` : hp?.close ? `<div class="score-note close">Close</div>` : ''}
       ${pA != null && !upset ? `<div class="odds" title="Win chances before the match"><span class="a">${fmtPct(pA)}</span><span class="b">${fmtPct(1 - pA)}</span></div>` : ''}
       ${detail ? `<div class="hpline">${hp ? `${hp.hpA >= hp.hpB ? '+' : '−'}${Math.abs(R0(hp.hpA - hp.hpB)).toLocaleString()} HP` : ''}</div>` : ''}
     </div>
-    ${side(B, 'b', m.winner === 'b', dl.b)}
+    ${side(B, 'b', m.winner === 'b', dl.rpB)}
     ${acts}
     ${decks}
   </div>`;
@@ -263,7 +270,7 @@ function daysLeft(L) {
 function seasonBar(L) {
   const sel = S.season || L.currentKey;
   const isAll = sel === 'all', isCur = sel === L.currentKey;
-  const note = isAll ? 'Continuous rating, no resets' : isCur ? daysLeft(L) : (() => {
+  const note = isAll ? 'Continuous, no season resets' : isCur ? daysLeft(L) : (() => {
     const c = L.champions.find(x => x.key === sel);
     return c ? `Final · champion ${esc(D().players[c.id]?.name || '?')}` : 'Final standings';
   })();
@@ -293,17 +300,32 @@ function viewEmpty() {
     </div>
   </section>`;
 }
-const SCORE_HELP = 'Score = rating − 2×RD: the rating the system is about 95% sure you are at least. Rankings use it, so a hot start with few games can\'t top the table until it holds up.';
-// During placements the score climbs mostly because RD shrinks, so a "+311" there isn't a real swing: label it instead.
-const inPlacement = s => s.games > 0 && tier(s).name === 'Placement';
+const RP_HELP = 'Ranked Points = the floor of your skill range (rating − 2×RD): the rating the system is about 95% sure you are above. Standings use it, so a hot start with few games can\'t top the table until it holds up.';
+const SR_HELP = 'Skill range: where the system thinks your true skill sits (rating ± 2×RD). It narrows as you play and widens while you are away. RP is its lower end.';
+const rankChip = (s, extra = '') => { const k = rank(s); return `<span class="chip ${k.cls}${extra}">${k.label}</span>`; };
+/** What a battle did to a player's rank: placed them, moved them up or down a division, or nothing. */
+function rankMove(dl, side) {
+  const rp = dl?.rp; if (!rp) return null;
+  const placedAfter = rp[side === 'a' ? 'placedA' : 'placedB'], preRd = side === 'a' ? dl.preRdA : dl.preRdB;
+  if (!placedAfter) return null;
+  const after = rankOf(rp[side + '1']);
+  if (preRd > PROVISIONAL_RD) return { kind: 'placed', to: after };
+  const before = rankOf(rp[side + '0']);
+  if (after.ord === before.ord) return null;
+  return { kind: after.ord > before.ord ? 'up' : 'down', to: after, from: before };
+}
+const moveChip = (mv, small = true) => (mv ? `<span class="chip rkmove ${mv.kind} ${mv.to.cls}${small ? ' sm' : ''}" title="${mv.kind === 'placed' ? 'Placements done' : mv.kind === 'up' ? `Promoted from ${mv.from.label}` : `Demoted from ${mv.from.label}`}">${mv.kind === 'placed' ? 'Placed · ' : mv.kind === 'up' ? '▲ ' : '▼ '}${mv.to.label}</span>` : '');
+const skillRange = s => `${R(s.r - 2 * s.rd)} – ${R(s.r + 2 * s.rd)}`;
+// RP cell: the number, the change from the last battle, and the rank underneath.
 function ratingCell(s) {
-  const d = inPlacement(s) ? '<span class="delta only-sm muted">Placement</span>' : s.lastScore != null ? `<span class="delta ${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : '';
-  return `<span class="rating num" title="${SCORE_HELP}">${R(s.score)}</span>${d}<span class="rd num" title="Rating ± RD (rating deviation: how sure the rating is; lower is more certain)">${R(s.r)} ±${R(s.rd)}</span>`;
+  if (!isPlaced(s)) return `<span class="rating num muted" title="RP shows once placements are done">—</span><span class="rd">${s.games ? 'Placing' : 'No battles yet'}</span>`;
+  const d = s.lastScore != null ? `<span class="delta ${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : '';
+  return `<span class="rating num" title="${RP_HELP}">${R(s.score)}</span>${d}<span class="rd">${rankChip(s)}</span>`;
 }
 /* ---------- standings sorting ---------- */
 const SORT_KEYS = {
   name: { dir: 'asc', val: (p) => p.name.toLowerCase() },
-  rating: { dir: 'desc', val: (p, s) => s.score },
+  rating: { dir: 'desc', val: (p, s) => (isPlaced(s) ? s.score : null) },
   wl: { dir: 'desc', val: (p, s) => s.w * 1000 - s.l },
   pct: { dir: 'desc', val: (p, s) => (s.games ? (s.w + 0.5 * s.d) / s.games : null) },
   cpg: { dir: 'desc', val: (p, s) => (s.games ? s.cf / s.games : null) },
@@ -317,7 +339,7 @@ function sortRows(rows, view) {
   return rows.slice().sort((a, b) => {
     const va = def.val(a, view.st[a.id]), vb = def.val(b, view.st[b.id]);
     if (va == null && vb == null) return 0;
-    if (va == null) return 1;   // players with no games stay at the bottom either way
+    if (va == null) return 1;   // unplaced players stay at the bottom either way
     if (vb == null) return -1;
     return (va < vb ? -1 : va > vb ? 1 : 0) * sign || rows.indexOf(a) - rows.indexOf(b);
   });
@@ -330,30 +352,31 @@ function sortTh(key, label, cls = '') {
   return `<th class="sortable ${cls}" aria-sort="${aria}"><button type="button" data-act="sort" data-key="${key}">${label}<span class="sarr" aria-hidden="true">${arrow}</span></button></th>`;
 }
 function viewStandings(data, L, view) {
-  const rows = ranking(data, view);
+  const all = ranking(data, view);
   if (!Object.keys(data.players).length) return viewEmpty();
-  const played = rows.filter(p => view.st[p.id].games > 0);
-  const leader = played[0];
-  let hot = null; for (const p of rows) { const s = view.st[p.id]; if (s.streakT === 'W' && s.streakN >= 2 && (!hot || s.streakN > view.st[hot.id].streakN)) hot = p; }
+  const rows = all.filter(p => isPlaced(view.st[p.id]));
+  const unplaced = all.filter(p => !isPlaced(view.st[p.id]));
+  const played = all.filter(p => view.st[p.id].games > 0);
+  const leader = rows[0];
+  let hot = null; for (const p of all) { const s = view.st[p.id]; if (s.streakT === 'W' && s.streakN >= 2 && (!hot || s.streakN > view.st[hot.id].streakN)) hot = p; }
   const pairs = {}; for (const m of view.ms) { const k = [m.a, m.b].sort().join('|'); pairs[k] = (pairs[k] || 0) + 1; }
   let top = null; for (const k in pairs) if (!top || pairs[k] > pairs[top]) top = k;
   const auto = view.ms.filter(m => m.source === 'api').length;
   const strip = `<section class="strip" aria-label="Summary">
-    <div><div class="k">Battles</div><div class="v num">${view.ms.length}</div><div class="s">${auto} auto-imported · ${played.length} of ${rows.length} players active</div></div>
-    <div><div class="k">Leader</div><div class="v">${leader ? esc(leader.name) : '—'}</div><div class="s">${leader ? R(view.st[leader.id].score) + ' · ' + tier(view.st[leader.id]).name : 'No battles yet'}</div></div>
+    <div><div class="k">Battles</div><div class="v num">${view.ms.length}</div><div class="s">${auto} auto-imported · ${played.length} of ${all.length} players active</div></div>
+    <div><div class="k">Leader</div><div class="v">${leader ? esc(leader.name) : '—'}</div><div class="s">${leader ? R(view.st[leader.id].score) + ' RP · ' + rank(view.st[leader.id]).label : played.length ? 'Nobody placed yet' : 'No battles yet'}</div></div>
     <div><div class="k">On fire</div><div class="v">${hot ? esc(hot.name) : '—'}</div><div class="s">${hot ? view.st[hot.id].streakN + ' wins in a row' : 'Nobody on a 2+ win streak'}</div></div>
     <div><div class="k">Biggest rivalry</div><div class="v">${top ? top.split('|').map(id => esc(data.players[id].name)).join(' <span class="muted">vs</span> ') : '—'}</div><div class="s">${top ? pairs[top] + (pairs[top] === 1 ? ' battle' : ' battles') : 'Play a friendly to start one'}</div></div>
   </section>`;
-  // Placement is fixed by rating; sorting only reorders the rows, each row keeps its placement number.
-  const place = new Map(rows.map((p, i) => [p.id, view.st[p.id].games ? i + 1 : '–']));
+  // Place is fixed by RP; sorting only reorders the rows, each row keeps its place number.
+  const place = new Map(rows.map((p, i) => [p.id, i + 1]));
   const shown = sortRows(rows, view);
   const body = shown.map(p => {
-    const s = view.st[p.id], t = tier(s), rk = place.get(p.id);
+    const s = view.st[p.id], rk = place.get(p.id);
     return `<tr class="link" data-href="#p-${esc(p.id)}">
       <td class="rank${rk === 1 ? ' first' : ''}">${rk === 1 ? CROWN : ''}${rk}</td>
       <td><a class="pl" href="#p-${esc(p.id)}">${avatar(p)}<span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}${champChip(L, p.id)}</span>${p.tag ? `<span class="tag">${esc(p.tag)}</span>` : '<span class="tag">No tag, not auto-tracked</span>'}</span></a></td>
       <td>${ratingCell(s)}</td>
-      <td class="hide-sm c-tier"><span class="chip ${t.cls}">${t.name}</span></td>
       <td class="num">${s.w}-${s.l}${s.d ? '-' + s.d : ''}</td>
       <td class="num r hide-sm">${pct(s)}</td>
       <td class="num r hide-md c-cpg">${s.games ? (s.cf / s.games).toFixed(1) : '—'}</td>
@@ -364,21 +387,36 @@ function viewStandings(data, L, view) {
   }).join('');
   const retired = Object.values(data.players).filter(p => p.archived);
   const champs = L.champions.length ? `<section class="panel">
-      <div class="panel-h"><h2>Season champions</h2><span class="muted" style="font-size:13px">Highest score at month's end, ${MIN_CHAMP_GAMES}+ battles</span></div>
-      <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${MEDAL}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num" title="Final score">${R(c.score ?? c.r)}</span></a>` : ''; }).join('')}</div>
+      <div class="panel-h"><h2>Season champions</h2><span class="muted" style="font-size:13px">Most RP at month's end, ${MIN_CHAMP_GAMES}+ battles</span></div>
+      <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${MEDAL}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num" title="Final RP">${R(c.score ?? c.r)} <small>RP</small></span></a>` : ''; }).join('')}</div>
     </section>` : '';
   const table = `<section class="panel">
     <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
-    <div class="panel-b table-wrap" style="padding-top:6px">
+    ${rows.length ? `<div class="panel-b table-wrap" style="padding-top:6px">
       <table>
-        <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'Score')}<th class="hide-sm c-tier">Tier</th>${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md c-cpg')}${sortTh('streak', 'Streak', 'hide-sm c-streak')}<th class="hide-md">Last 5</th><th class="hide-md c-trend">Trend</th></tr></thead>
+        <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'RP')}${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md c-cpg')}${sortTh('streak', 'Streak', 'hide-sm c-streak')}<th class="hide-md">Last 5</th><th class="hide-md c-trend">Trend</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
-    </div>
+    </div>` : `<div class="panel-b muted" style="padding-top:8px">Nobody is placed yet${L.seasons.length > 1 && view.key !== 'all' ? ' this season' : ''}. The table fills in as players finish their placement battles.</div>`}
+    ${unplaced.length ? unplacedHtml(unplaced, view) : ''}
     ${retired.length ? `<div class="panel-b muted" style="padding-top:0;font-size:13.5px">Retired: ${retired.map(p => `<a href="#p-${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}
   </section>`;
   // Phones lead with the table itself; the summary tiles follow it.
   return seasonBar(L) + (narrow() ? table + strip : strip + table) + champs;
+}
+// Players the system isn't sure about yet: no RP, no rank, just how far along their placements are.
+function placingProgress(s) {
+  const rd0 = s.rdHist[0] ?? 350, span = rd0 - PROVISIONAL_RD;
+  return span > 0 ? Math.max(0, Math.min(1, (rd0 - s.rd) / span)) : 1;
+}
+function unplacedHtml(list, view) {
+  return `<div class="unplaced">
+    <div class="unplaced-h"><span>Unplaced</span><span class="muted">RP and rank show after placements: about ${PLACEMENT_HINT} battles at first, 3 each new season</span></div>
+    ${list.map(p => { const s = view.st[p.id], pr = placingProgress(s); return `<a class="unplaced-row" href="#p-${esc(p.id)}">
+      ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}</span></span>
+      <span class="un-prog" title="Placement progress"><i style="width:${Math.round(pr * 100)}%"></i></span><span class="un-pct num">${s.games ? Math.round(pr * 100) + '%' : ''}</span>
+    </a>`; }).join('')}
+  </div>`;
 }
 function viewMatches(data, L, view) {
   const players = Object.values(data.players).sort((a, b) => a.name.localeCompare(b.name));
@@ -401,13 +439,13 @@ function viewMatches(data, L, view) {
 }
 /* ---------- rivalry ---------- */
 const pairHash = (a, b) => `#r-${a}-${b}`;
-// Swap a match's sides (and its rating deltas) so a given player is always on the blue/left side.
+// Swap a match's sides (and its deltas) so a given player is always on the blue/left side.
 const SWAP_W = { a: 'b', b: 'a', draw: 'draw' };
 function flipMatch(m) {
   return { ...m, a: m.b, b: m.a, ca: m.cb, cb: m.ca, winner: SWAP_W[m.winner] || m.winner, deckA: m.deckB, deckB: m.deckA,
     stats: m.stats ? { a: m.stats.b, b: m.stats.a } : m.stats };
 }
-const flipDelta = d => (d ? { ...d, a: d.b, b: d.a, preA: d.preB, preB: d.preA, pA: d.pA == null ? d.pA : 1 - d.pA } : d);
+const flipDelta = d => (d ? { ...d, a: d.b, b: d.a, preA: d.preB, preB: d.preA, preRdA: d.preRdB, preRdB: d.preRdA, rpA: d.rpB, rpB: d.rpA, rp: d.rp && { a0: d.rp.b0, a1: d.rp.b1, b0: d.rp.a0, b1: d.rp.a1, placedA: d.rp.placedB, placedB: d.rp.placedA }, pA: d.pA == null ? d.pA : 1 - d.pA } : d);
 /** Resolve "#r-<a>-<b>" against real player ids (ids may themselves contain hyphens). */
 function resolvePair(raw, players) {
   for (let i = raw.indexOf('-'); i > 0; i = raw.indexOf('-', i + 1)) {
@@ -459,7 +497,7 @@ function rivalryPanel(data, L, view) {
       o.cA += ca; o.cB += cb;
       if (res === 'w' && ca === 3) o.threeA++; if (res === 'l' && cb === 3) o.threeB++;
       const h = hpInfo(m); if (h) o.hpN++; if (h?.close) { o.close.n++; o.close[res]++; }
-      const dl = deltas[m.id]; if (dl && dl[aSide] != null) o.swing += dl[aSide];
+      const dl = deltas[m.id]; const rd = dl && (aSide === 'a' ? dl.rpA : dl.rpB); if (rd != null) o.swing += rd;
     }
     return o;
   };
@@ -486,21 +524,21 @@ function rivalryPanel(data, L, view) {
     <div class="panel-h"><h2>Rivalry</h2><span class="muted" style="font-size:13px">Pick any two players. Tap a cell in the table below to jump here.</span></div>
     <div class="panel-b">
       <div class="predict">
-        <div class="pside a"><select id="predA" aria-label="Blue side player">${opts(S.pa)}</select><span class="pr num">${R(la.r)} <span class="muted">±${R(la.rd)}</span></span></div>
+        <div class="pside a"><select id="predA" aria-label="Blue side player">${opts(S.pa)}</select><span class="pr num" title="${SR_HELP}">${skillRange(la)}</span></div>
         <div class="pvs">VS</div>
-        <div class="pside b"><select id="predB" aria-label="Red side player">${opts(S.pb)}</select><span class="pr num">${R(lb.r)} <span class="muted">±${R(lb.rd)}</span></span></div>
+        <div class="pside b"><select id="predB" aria-label="Red side player">${opts(S.pb)}</select><span class="pr num" title="${SR_HELP}">${skillRange(lb)}</span></div>
       </div>
       <div class="pbar" role="img" aria-label="Next game: ${esc(A.name)} ${fmtPct(p)}, ${esc(B.name)} ${fmtPct(1 - p)}">
         <div class="pa" style="width:${(p * 100).toFixed(1)}%"><span>${fmtPct(p)}</span></div>
         <div class="pb"><span>${fmtPct(1 - p)}</span></div>
       </div>
-      <p class="muted chart-note" style="margin-top:6px">Chance to win the next game, from current ratings and how sure they are.</p>
+      <p class="muted chart-note" style="margin-top:6px">Chance to win the next game, from both skill ranges.</p>
       ${tA.n ? `<div class="rv-tiles">
         <div><div class="k">All time</div><div class="v num">${rec(tA)}</div><div class="s">${lead === 0 ? 'Dead even' : `${esc(lead > 0 ? A.name : B.name)} leads by ${Math.abs(lead)}`}</div></div>
         ${tS ? `<div><div class="k">${esc(seasonLabel(seasonKeyNow, true))}</div><div class="v num">${tS.n ? rec(tS) : '—'}</div><div class="s">${tS.n} battle${tS.n === 1 ? '' : 's'} this season</div></div>` : ''}
         <div><div class="k">Crowns</div><div class="v num">${tA.cA}–${tA.cB}</div><div class="s">3-crowns: ${tA.threeA}–${tA.threeB}</div></div>
         <div><div class="k">Close games</div><div class="v num">${tA.close.n ? rec(tA.close) : '—'}</div><div class="s">${tA.close.n ? `${tA.close.n} decided by a hair` : tA.hpN ? 'None yet' : 'No tower HP data yet'}</div></div>
-        <div><div class="k">Rating swapped</div><div class="v num ${dCls(tA.swing)}">${fmtD(tA.swing)}</div><div class="s">for ${esc(A.name)} across the series</div></div>
+        <div><div class="k">RP swapped</div><div class="v num ${dCls(tA.swing)}">${fmtD(tA.swing)}</div><div class="s">for ${esc(A.name)} across the series</div></div>
       </div>
       <h3 class="sub" style="margin-top:18px">Series momentum</h3>
       ${momentumChart(data, A, B, all) || '<p class="muted" style="margin:0">Needs at least 2 battles.</p>'}
@@ -579,12 +617,15 @@ function matchDetail(id) {
     hp?.close ? '<span class="chip closechip">Close</span>' : '',
     m.ranked ? '' : '<span class="chip">Unrated</span>',
   ].filter(Boolean).join('');
-  const side = (p, s, crowns, won, d, pre, prob) => `<div class="md-side ${s}${won ? ' won' : ''}">
+  // RP before → after, or "placing" while the system is still unsure; the skill change sits underneath in small print.
+  const side = (p, s, crowns, won, d, prob) => { const rp = dl.rp, rpd = s === 'a' ? dl.rpA : dl.rpB; return `<div class="md-side ${s}${won ? ' won' : ''}">
       <a class="md-name" href="#p-${esc(p.id)}" data-act="close-nav">${avatar(p)}<b>${esc(p.name)}</b>${won ? CROWN : ''}</a>
       <div class="md-crowns">${[1, 2, 3].map(i => `<span class="${i <= crowns ? 'on' : ''}">${CROWN}</span>`).join('')}</div>
       ${prob != null ? `<div class="md-odds">${fmtPct(prob)} to win</div>` : ''}
-      ${d != null ? `<div class="md-rating num">${R(pre)} → ${R(pre + d)} <span class="${dCls(d)}">${fmtD(d)}</span></div>` : m.ranked ? '' : '<div class="md-rating muted">Unrated</div>'}
-    </div>`;
+      ${rpd != null ? `<div class="md-rating num"><span>${R(rp[s + '0'])} → ${R(rp[s + '1'])}</span> <span class="${dCls(rpd)}">${fmtD(rpd)} RP</span></div>` : d != null ? '<div class="md-rating muted">Placing</div>' : m.ranked ? '' : '<div class="md-rating muted">Unrated</div>'}
+      ${d != null ? `<div class="md-skill muted num" title="${SR_HELP}">skill ${fmtD(d)}</div>` : ''}
+      ${moveChip(rankMove(dl, s), false) ? `<div class="md-move">${moveChip(rankMove(dl, s), false)}</div>` : ''}
+    </div>`; };
   const lk = s => m.stats?.[s]?.leaked;
   const lA = lk('a'), lB = lk('b'), lMax = Math.max(5, lA || 0, lB || 0);
   const leakRow = (p, v, s) => `<div class="tw"><span class="tl">${esc(p.name)}</span><span class="hbar leak"><i style="width:${v == null ? 0 : (100 * v / lMax).toFixed(1)}%"></i></span><span class="tv num">${v == null ? '—' : v.toFixed(1)}</span></div>`;
@@ -592,9 +633,9 @@ function matchDetail(id) {
   const body = `
     <div class="md-top"><span class="muted">${esc(when.day)}, ${esc(when.time)} · ${esc(m.mode)}</span><span class="md-tags">${tags}</span></div>
     <div class="md-board">
-      ${side(A, 'a', m.ca, m.winner === 'a', dl.a, dl.preA, pA)}
+      ${side(A, 'a', m.ca, m.winner === 'a', dl.a, pA)}
       <div class="md-score num"><span class="a">${m.ca}</span><span class="dash">–</span><span class="b">${m.cb}</span></div>
-      ${side(B, 'b', m.cb, m.winner === 'b', dl.b, dl.preB, pA == null ? null : 1 - pA)}
+      ${side(B, 'b', m.cb, m.winner === 'b', dl.b, pA == null ? null : 1 - pA)}
     </div>
     ${m.stats ? `<div class="md-grid">
       <div><h4 class="sub">${esc(A.name)}'s towers</h4>${towersHtml(m.stats.a, m.cb, towerMax(A.id, data))}</div>
@@ -645,7 +686,7 @@ function cardsSection(id, data, view) {
     </div>
   </section>`;
 }
-// Ladder trophies live only here, kept small: the league is about league rating.
+// Ladder trophies live only here, kept small: the league is about RP.
 function ladderChip(p) {
   const t = p.ladder?.trophies;
   if (!Number.isFinite(t)) return '';
@@ -655,9 +696,9 @@ function ladderChip(p) {
 function viewPlayer(id, data, L, view) {
   const p = data.players[id];
   if (!p) return `<section class="panel"><div class="panel-b"><p style="margin:0">That player isn't in this league. <a href="#standings">Back to standings</a></p></div></section>`;
-  const s = view.st[id], t = tier(s);
-  const order = ranking(data, view); const pos = order.findIndex(x => x.id === id);
-  const rankTxt = p.archived ? 'Retired' : s.games ? `#${pos + 1} of ${order.filter(x => view.st[x.id].games).length}` : 'No battles this season';
+  const s = view.st[id], k = rank(s), placed = isPlaced(s);
+  const order = ranking(data, view).filter(x => isPlaced(view.st[x.id])); const pos = order.findIndex(x => x.id === id);
+  const rankTxt = p.archived ? 'Retired' : placed ? `#${pos + 1} of ${order.length}` : s.games ? `Placing · ${s.games} of ~${PLACEMENT_HINT} battles` : 'No battles this season';
   const mine = view.ms.filter(m => m.a === id || m.b === id);
   let best = null;
   for (const m of mine) {
@@ -667,12 +708,15 @@ function viewPlayer(id, data, L, view) {
     if (!best || opp > best.r) best = { r: opp, oppId: isA ? m.b : m.a };
   }
   const titles = L.champions.filter(c => c.id === id);
+  // Highest rank ever reached, shown when it beats what this view shows.
+  const allPeak = Math.max(L.all.st[id]?.peakScore ?? -Infinity, ...L.seasons.map(sk => L.byKey[sk]?.st[id]?.peakScore ?? -Infinity));
+  const bestEver = L.all.st[id]?.games && (!placed || rankOf(allPeak).ord > rankOf(s.peakScore).ord) && isFinite(allPeak) && allPeak >= RANKS[0].min ? rankOf(allPeak) : null;
   const pcl = clutch(data, view).find(r => r.id === id), plk = leaks(data, view).find(r => r.id === id);
   const h2h = Object.entries(s.h2h).sort((a, b) => b[1].n - a[1].n);
   const w = writable();
-  const points = [{ r: START_R, rd: 350 }, ...(L.timeline[id] || [])];
-  // If they've never played, the reset entries alone aren't a history.
-  const chartPts = (L.timeline[id] || []).some(x => !x.reset) ? points : [];
+  // Season resets before the first battle aren't history; the chart starts at the first game.
+  const tl = L.timeline[id] || [], firstGame = tl.findIndex(x => !x.reset);
+  const chartPts = firstGame < 0 ? [] : tl.slice(firstGame);
   return `<a class="back" href="#standings">← Standings</a>
   ${seasonBar(L)}
   <section class="panel">
@@ -680,10 +724,12 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${t.cls}">${t.name}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
+        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
-      <div class="big"><div class="k" title="${SCORE_HELP}">Score</div><div class="rating num">${R(s.score)}</div><div class="muted" style="font-size:13px">Rating ${R(s.r)} ±${R(s.rd)} · Peak ${R(s.peak)}${s.lastScore != null && !inPlacement(s) ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}</div></div>
+      <div class="big"><div class="k" title="${RP_HELP}">Ranked Points</div><div class="rating num${placed ? '' : ' muted'}">${placed ? R(s.score) : '—'}</div>
+        <div class="muted" style="font-size:13px">${placed ? (s.lastScore != null ? `Last battle <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : 'No change yet') : s.games ? 'Shown once placed' : 'Play a friendly to start'}</div>
+        <div class="muted srange" title="${SR_HELP}">Skill range <b class="num">${skillRange(s)}</b><span class="hide-sm"> · centre ${R(s.r)}</span></div></div>
       ${w ? `<div class="tools">
         <button class="btn small" type="button" data-act="log" data-id="${esc(id)}">Log a match</button>
         <button class="btn small" type="button" data-act="edit-player" data-id="${esc(id)}">Edit profile</button>
@@ -706,12 +752,12 @@ function viewPlayer(id, data, L, view) {
   </section>
   <div class="grid2">
     <section class="panel">
-      <div class="panel-h"><h2>Rating history</h2>${best ? `<span class="muted" style="font-size:13px">Best win: ${esc(data.players[best.oppId].name)} at ${R(best.r)}</span>` : ''}</div>
-      <div class="panel-b">${ratingChart(chartPts)}<p class="muted chart-note">The line is rating; the band is ±2 RD, so its lower edge is the score. Dashed lines are season resets.</p></div>
+      <div class="panel-h"><h2>RP and skill history</h2>${placed ? `<span class="muted" style="font-size:13px">Peak <b class="num">${R(s.peakScore)}</b> RP · ${rankOf(s.peakScore).label}${bestEver ? ` · all-time best <span class="chip ${bestEver.cls}">${bestEver.label}</span>` : ''}</span>` : bestEver ? `<span class="muted" style="font-size:13px">All-time best <span class="chip ${bestEver.cls}">${bestEver.label}</span></span>` : ''}</div>
+      <div class="panel-b">${ratingChart(chartPts)}<p class="muted chart-note"><span class="lg rp"></span>RP, dashed while unplaced · <span class="lg band"></span>skill range with its centre line · vertical dashes are season resets.${best ? ` Best win: ${esc(data.players[best.oppId].name)} at ${R(best.r)} skill.` : ''}</p></div>
     </section>
     <section class="panel">
       <div class="panel-h"><h2>Head to head</h2></div>
-      <div class="panel-b table-wrap">${h2h.length ? `<table class="compact h2h"><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-lg">Crowns</th><th class="r">Rating won</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
+      <div class="panel-b table-wrap">${h2h.length ? `<table class="compact h2h"><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-lg">Crowns</th><th class="r" title="RP won or lost against this opponent, placement games excluded">RP ±</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
         const o = data.players[oid]; const pw = winProb(L.live[id], L.live[oid]);
         return `<tr><td><a class="pl" href="#p-${esc(oid)}">${avatar(o)}<span class="nm">${esc(o.name)}</span></a></td><td class="num">${h.w}-${h.l}${h.d ? '-' + h.d : ''}</td><td class="num r hide-lg">${h.cf}–${h.ca}</td><td class="num r ${dCls(h.net)}">${fmtD(h.net)}</td><td class="num r ${pw >= 0.5 ? 'up' : 'down'}">${fmtPct(pw)}</td></tr>`;
       }).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No battles in this view.</p>'}</div>
@@ -729,6 +775,20 @@ const nameOf = (data, id) => esc(data.players[id]?.name || '?');
 const pctOrDash = v => (v == null ? '—' : fmtPct(v));
 const rec3 = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
 
+// How the placed players spread across the ranks in this view.
+function rankDistHtml(data, view) {
+  const placed = Object.values(data.players).filter(p => !p.archived && view.st[p.id] && isPlaced(view.st[p.id]));
+  if (!placed.length) return '';
+  const by = new Map(RANKS.map(k => [k.name, []]));
+  for (const p of placed) by.get(rank(view.st[p.id]).name).push(p);
+  const total = placed.length;
+  const segs = RANKS.slice().reverse().filter(k => by.get(k.name).length).map(k => { const n = by.get(k.name).length; return `<span class="rd-seg ${k.cls}" style="flex:${n}" title="${k.name}: ${by.get(k.name).map(p => p.name).join(', ')}"><b>${n}</b></span>`; }).join('');
+  const rows = RANKS.slice().reverse().filter(k => by.get(k.name).length).map(k => `<div class="rd-row"><span class="chip ${k.cls}">${k.name}</span><span class="rd-names">${by.get(k.name).map(p => { const s = view.st[p.id], kk = rank(s); return `<a href="#p-${esc(p.id)}">${esc(p.name)}<small class="muted"> ${kk.div ? ['', 'I', 'II', 'III'][kk.div] : ''}</small></a>`; }).join('')}</span></div>`).join('');
+  return `<section class="panel">
+    <div class="panel-h"><h2>Ranks</h2><span class="muted" style="font-size:13px">${total} placed</span></div>
+    <div class="panel-b"><div class="rank-dist" role="img" aria-label="Players per rank">${segs}</div><div class="rd-rows">${rows}</div></div>
+  </section>`;
+}
 function raceChart(data, RC) {
   if (!RC.series.length) return '<p class="muted" style="margin:0">No rated battles in this view yet.</p>';
   const W = narrow() ? 430 : 760, H = narrow() ? 300 : 300, l = 40, r = narrow() ? 104 : 120, t = 14, b = 28;
@@ -741,7 +801,7 @@ function raceChart(data, RC) {
   const y = v => t + (1 - (v - lo) / (hi - lo)) * (H - t - b);
   let g = '';
   for (let v = lo; v <= hi; v += step) g += `<line class="grid" x1="${l}" x2="${W - r}" y1="${y(v)}" y2="${y(v)}"/><text x="${l - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
-  // Step lines: a rating holds until the next game.
+  // Step lines: RP holds until the next game.
   const lines = RC.series.map(s => {
     const p = data.players[s.id];
     let d = `M${x(s.pts[0].t).toFixed(1)} ${y(s.pts[0].r).toFixed(1)}`;
@@ -754,7 +814,7 @@ function raceChart(data, RC) {
   const lab = labels.map(({ s, y: yy }) => { const p = data.players[s.id]; return `<circle cx="${W - r}" cy="${y(s.last).toFixed(1)}" r="3.5" style="fill:${esc(p.color)}"/><text class="rlab" x="${W - r + 8}" y="${(yy + 4).toFixed(1)}" style="fill:${esc(p.color)}">${esc(trunc(p.name, narrow() ? 9 : 11))} ${R0(s.last)}</text>`; }).join('');
   const d0 = new Date(RC.start), d1 = new Date(RC.end);
   const fmt = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating race: ${RC.series.map(s => `${esc(data.players[s.id].name)} ${R0(s.last)}`).join(', ')}">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="RP race: ${RC.series.map(s => `${esc(data.players[s.id].name)} ${R0(s.last)}`).join(', ')}">
     ${g}<line class="base" x1="${l}" x2="${W - r}" y1="${y(1500)}" y2="${y(1500)}"/>${lines}${lab}
     <text x="${l}" y="${H - 6}">${fmt(d0)}</text><text x="${W - r}" y="${H - 6}" text-anchor="end">${fmt(d1)}</text>
   </svg>`;
@@ -827,9 +887,10 @@ function viewStats(data, L, view) {
     </div>
   </section>
   <section class="panel">
-    <div class="panel-h"><h2>${key === 'all' ? 'Rating race, all time' : 'Season race (rating)'}</h2><span class="muted" style="font-size:13px">Every rated battle, step by step</span></div>
+    <div class="panel-h"><h2>${key === 'all' ? 'RP race, all time' : 'Season race'}</h2><span class="muted" style="font-size:13px">RP after every rated battle, step by step</span></div>
     <div class="panel-b">${raceChart(data, RC)}</div>
   </section>
+  ${rankDistHtml(data, view)}
   <section class="panel">
     <div class="panel-h"><h2>Record book</h2><span class="muted" style="font-size:13px">All time</span></div>
     <div class="panel-b records">${rec.length ? rec.map(r => recordCard(data, r)).join('') : '<p class="muted" style="margin:0">Records appear once a few battles are in.</p>'}</div>
@@ -850,7 +911,7 @@ async function drawRecap(data, L) {
   const W = 1080, H = 1350, x = cv.getContext('2d');
   const wk = weekly(data, L);
   const view = L.byKey[L.currentKey];
-  const top = ranking(data, view).filter(p => view.st[p.id].games > 0).slice(0, 5);
+  const top = ranking(data, view).filter(p => isPlaced(view.st[p.id])).slice(0, 5);
   const DISP = '"Lilita One", "Arial Rounded MT Bold", sans-serif', BODY = 'Archivo, system-ui, sans-serif';
   // Arena split background
   x.fillStyle = '#0b1222'; x.fillRect(0, 0, W, H);
@@ -875,7 +936,7 @@ async function drawRecap(data, L) {
   };
   const nm = id => data.players[id]?.name || '?';
   tile(70, 300, 455, 'Battles', String(wk.battles), `${wk.threes} three-crown${wk.threes === 1 ? '' : 's'}`);
-  tile(555, 300, 455, 'Top climber', wk.topGainer && wk.topGainer.net > 0 ? nm(wk.topGainer.id) : '—', wk.topGainer && wk.topGainer.net > 0 ? `+${R0(wk.topGainer.net)} rating` : 'Nobody climbed', '#3fd68f');
+  tile(555, 300, 455, 'Top climber', wk.topGainer && wk.topGainer.net > 0 ? nm(wk.topGainer.id) : '—', wk.topGainer && wk.topGainer.net > 0 ? `+${R0(wk.topGainer.net)} RP` : 'Nobody climbed', '#3fd68f');
   tile(70, 500, 455, 'Most wins', wk.mostWins && wk.mostWins.w ? nm(wk.mostWins.id) : '—', wk.mostWins && wk.mostWins.w ? `${rec3(wk.mostWins)} this week` : '');
   const up = wk.upset;
   tile(555, 500, 455, 'Upset of the week', up ? nm(up.m.winner === 'a' ? up.m.a : up.m.b) : '—', up ? `beat ${nm(up.m.winner === 'a' ? up.m.b : up.m.a)} at ${Math.round(up.p * 100)}%` : 'Favorites held', '#ffc63a');
@@ -890,7 +951,8 @@ async function drawRecap(data, L) {
     x.fillStyle = '#edf1ff'; x.font = `700 34px ${BODY}`; x.fillText(p.name, 230, y0 + 51, 430);
     x.textAlign = 'right';
     if (wkRow && Math.round(wkRow.net)) { x.fillStyle = wkRow.net > 0 ? '#3fd68f' : '#f27b8b'; x.font = `700 28px ${BODY}`; x.fillText(`${wkRow.net > 0 ? '+' : '−'}${Math.abs(R0(wkRow.net))} this week`, 820, y0 + 50); }
-    x.fillStyle = i === 0 ? '#ffc63a' : '#edf1ff'; x.font = `44px ${DISP}`; x.fillText(String(R0(s.score)), 990, y0 + 55);
+    x.fillStyle = i === 0 ? '#ffc63a' : '#edf1ff'; x.font = `40px ${DISP}`; x.fillText(`${R0(s.score)}`, 990, y0 + 44);
+    x.fillStyle = '#8e9bc1'; x.font = `700 17px ${BODY}`; x.fillText(rank(s).label.toUpperCase(), 990, y0 + 68);
     x.textAlign = 'left';
   });
   x.fillStyle = '#8e9bc1'; x.font = `500 24px ${BODY}`; x.fillText(location.host || 'friendly battle league', 70, H - 50);
@@ -989,16 +1051,23 @@ function viewAbout(data) {
   const name = esc(data.league.name || 'Friendly Battle League');
   const faq = [
     ['My friendly didn\'t show up. Why?', `Both players need their player tag saved in the league, and it has to be a 1v1 friendly or clan-mate battle. The server checks battle logs every ${syncMin()} minutes, so give it a few. The game only keeps your last 25 battles, so if <i>both</i> of you played 25+ other games before the next check, it's gone. An editor can always log it by hand.`],
-    ['Do ladder, 2v2, or tournament games count?', 'No. Only 1v1 friendly battles between two league members count. Your ladder trophies have nothing to do with your rating here.'],
-    ['Why is someone with a lower rating ranked above me?', 'Rankings use your <b>score</b> (rating − 2×RD), not raw rating. If you\'ve played fewer games, the system is less sure about you, so your score sits lower until it has more data.'],
-    ['Why does it say "Placement" next to my name?', `Your RD (uncertainty) is still above 110, so the system doesn't trust your rating yet. Play a few more battles. Everyone goes through a short placement stretch at the start of each season too.`],
-    ['My score dropped and I didn\'t even play.', 'That\'s RD growing while you\'re inactive. The longer you\'re away, the less sure the system is about you, so your score slowly drifts down. Playing again brings it back.'],
+    ['Do ladder, 2v2, or tournament games count?', 'No. Only 1v1 friendly battles between two league members count. Your ladder trophies have nothing to do with your RP here.'],
+    ['What\'s the difference between RP and my skill range?', 'Your <b>skill range</b> is where the system thinks your true skill sits; it narrows as you play. <b>RP</b> is the bottom of that range: the skill the system is about 95% sure you have. Standings and ranks use RP, so a hot start on few games can\'t top the table until it holds up. The skill range only shows on your profile.'],
+    ['Why am I unplaced?', `The system isn't sure enough about you yet, so your RP and rank are hidden. It takes about ${PLACEMENT_HINT} battles the first time, and about 3 at the start of each season. Unplaced players sit below the standings until they're done.`],
+    ['Why is someone with a worse record ranked above me?', 'Ranks go by RP, not by wins. Beating stronger players is worth more than beating weaker ones, winning by more crowns is worth more, and the system has to be sure about you. Two players with the same record can sit in different divisions.'],
+    ['My RP dropped and I didn\'t even play.', 'That\'s your skill range widening while you\'re inactive. The longer you\'re away, the less sure the system is about you, so RP (the bottom of the range) slowly drifts down. Playing again brings it back.'],
     ['What happens when crowns are tied?', 'The app reads both sides\' remaining tower HP from the battle log and applies the in-game tiebreaker rule. If that info isn\'t there, it counts as a draw.'],
-    ['A match is wrong. Can it be fixed?', 'Yes. Anyone with the league password can edit or delete any match. Ratings are recalculated from the full history every time, so fixing an old match fixes everything after it. Deleted imports stay deleted and won\'t sneak back in on the next sync.'],
+    ['A match is wrong. Can it be fixed?', 'Yes. Anyone with the league password can edit or delete any match. RP is recalculated from the full history every time, so fixing an old match fixes everything after it. Deleted imports stay deleted and won\'t sneak back in on the next sync.'],
     ['How do I edit stuff?', 'Tap <b>Unlock editing</b> at the bottom of the page and enter the league password. Anyone can view the league without it.'],
     ['Can I put this on my home screen?', 'Yes. On iPhone, open it in Safari, tap Share, then <b>Add to Home Screen</b>. On Android or desktop Chrome, use <b>Install app</b> from the browser menu. It opens full-screen like a regular app.'],
     ['Is the rating system actually any good?', 'Check the <a href="#lab">Lab</a>. It replays every rated battle and scores the win predictions against what actually happened, and compares them to plain Elo.'],
   ];
+  const D = DIVISION_RP;
+  const rankRows = RANKS.slice().reverse().map((k, i) => {
+    const top = i === 0, wood = i === RANKS.length - 1;
+    const divs = top ? `${k.min}+ RP` : `III ${wood ? `under ${k.min + D}` : `${k.min}–${k.min + D - 1}`} · II ${k.min + D}–${k.min + 2 * D - 1} · I ${k.min + 2 * D}–${k.min + 3 * D - 1}`;
+    return `<li><span class="chip ${k.cls}">${k.name}</span><span class="muted num">${divs}</span></li>`;
+  }).join('');
   return `<section class="panel about-hero"><div class="panel-b">
       <div class="eyebrow">About</div>
       <h2 class="lab-h">What is ${name}?</h2>
@@ -1013,25 +1082,26 @@ function viewAbout(data) {
     </ul></div></section>
     <section class="panel"><div class="panel-h"><h2>Seasons</h2></div><div class="panel-b"><ul class="about-list">
       <li>Seasons run by calendar month.</li>
-      <li>On the 1st, every rating moves halfway back to ${START_R} and uncertainty goes up a bit, so the first few games of a new season are placements.</li>
-      <li>The highest score at the end of the month, with at least ${MIN_CHAMP_GAMES} battles played, is crowned <b>season champion</b>.</li>
+      <li>On the 1st, skill moves halfway back to ${START_R} and everyone's skill range widens, so everyone replays a few placement battles before their RP shows again.</li>
+      <li>The most RP at the end of the month, placed and with at least ${MIN_CHAMP_GAMES} battles, is crowned <b>season champion</b>.</li>
       <li>Use the season picker at the top of most pages to look back at older months or all time.</li>
     </ul></div></section>
   </div>
-  <section class="panel"><div class="panel-h"><h2>How ratings work</h2></div><div class="panel-b"><ul class="about-list">
-    <li>Ratings use <b>Glicko-2</b>, an upgraded version of Elo. Everyone starts at <b>${START_R}</b> with a rating deviation (RD) of 350. RD is the ± next to a rating: how sure the system is about you. It shrinks as you play and grows while you're away.</li>
-    <li>Beating someone rated higher earns more. Results move uncertain ratings (new players, people coming back) faster than settled ones. Draws split the points; tiebreaker wins count as wins.</li>
-    <li><b>Crowns matter.</b> Against an even opponent, a 2-crown win moves ratings 1.15× as much as a 1-crown win, and a 3-crown win 1.3×. The bonus grows when the underdog wins and shrinks when a big favorite stomps a weaker player. The loser drops by the same multiple.</li>
-    <li><b>Rankings use your score</b>, which is rating − 2×RD: the rating the system is about 95% sure you're at least at. A lucky first game can't top the table, but a real hot streak against strong players still climbs fast.</li>
-    <li>Tiers go by score: Bronze under 1300, Silver 1300+, Gold 1400+, Diamond 1500+, Champion 1600+. "Placement" shows while RD is above 110.</li>
-    <li>Win chances come from both players' ratings and RDs, so two uncertain ratings pull the odds toward 50/50. An <b>Upset</b> is a win the system gave under 35%.</li>
+  <section class="panel"><div class="panel-h"><h2>RP, ranks and skill</h2></div><div class="panel-b"><ul class="about-list">
+    <li>Under the hood the league runs <b>Glicko-2</b>, an upgraded Elo. Every player has a hidden skill estimate and a <b>skill range</b> around it: how sure the system is. The range narrows as you play and widens while you're away.</li>
+    <li><b>Ranked Points (RP)</b> are the bottom of your skill range (skill − 2×RD): the skill the system is about 95% sure you have. Standings, ranks and champions all use RP. A lucky first game can't top the table, but a real hot streak against strong players still climbs fast.</li>
+    <li>Beating someone with higher skill earns more. Results move uncertain players (new, or coming back) further than settled ones. Draws split the points; tiebreaker wins count as wins.</li>
+    <li><b>Crowns matter.</b> Against an even opponent, a 2-crown win moves skill 1.15× as much as a 1-crown win, and a 3-crown win 1.3×. The bonus grows when the underdog wins and shrinks when a big favorite stomps a weaker player. The loser drops by the same multiple.</li>
+    <li><b>Placements.</b> Until the system is sure enough about you (RD ${PROVISIONAL_RD} or less) you're <b>unplaced</b>: no RP, no rank, listed below the standings. That's about ${PLACEMENT_HINT} battles the first time and about 3 at the start of each season.</li>
+    <li>Win chances come from both players' skill ranges, so two wide ranges pull the odds toward 50/50. An <b>Upset</b> is a win the system gave under 35%.</li>
     <li>Nothing is stored as a rating. Everything is recalculated from the full match history, so fixing an old match fixes everything after it.</li>
   </ul></div></section>
+  <section class="panel"><div class="panel-h"><h2>Ranks</h2><span class="muted" style="font-size:13px">By RP. Each rank below Champion spans ${3 * DIVISION_RP} RP in three divisions, III up to I</span></div><div class="panel-b"><ul class="rank-list">${rankRows}</ul></div></section>
   <section class="panel"><div class="panel-h"><h2>What's on each page</h2></div><div class="panel-b"><dl class="about-pages">
-    <div><dt><a href="#standings">Standings</a></dt><dd>The table: score, rating, record, streak and recent form. Tap a player for their profile, rating history, decks and head-to-heads.</dd></div>
-    <div><dt><a href="#matches">Matches</a></dt><dd>Every battle, newest first. Tap one for decks, tower HP and how much each player's rating moved.</dd></div>
+    <div><dt><a href="#standings">Standings</a></dt><dd>The table: RP, rank, record, streak and recent form. Tap a player for their profile, skill history, decks and head-to-heads.</dd></div>
+    <div><dt><a href="#matches">Matches</a></dt><dd>Every battle, newest first. Tap one for decks, tower HP and how much RP each player won or lost.</dd></div>
     <div><dt><a href="#rivalries">Rivalries</a></dt><dd>Pick any two players for their head-to-head record, win chance and how their decks match up.</dd></div>
-    <div><dt><a href="#stats">Stats</a></dt><dd>The rating race, record book, clutch and tilt stats, the league meta, when people play, and a shareable weekly recap.</dd></div>
+    <div><dt><a href="#stats">Stats</a></dt><dd>The RP race, record book, clutch and tilt stats, the league meta, when people play, and a shareable weekly recap.</dd></div>
     <div><dt><a href="#lab">Lab</a></dt><dd>Nerd corner: how well the rating system predicts results, and a tuner that tests other settings.</dd></div>
   </dl></div></section>
   <section class="panel"><div class="panel-h"><h2>FAQ</h2></div><div class="panel-b faq">
@@ -1051,8 +1121,8 @@ function maybeHowTo(r) {
     try { localStorage.setItem(HOWTO_KEY, '1'); } catch { /* storage blocked */ }
     openDlg('How this works', `<ul class="howto">
         <li><span class="hi" aria-hidden="true">1</span><span><b>Play friendlies.</b> Any 1v1 friendly between league members gets picked up from the battle log within ~${syncMin()} minutes. No need to log anything.</span></li>
-        <li><span class="hi" aria-hidden="true">2</span><span><b>Ratings, not just wins.</b> Beating stronger players and winning by more crowns moves you further. The table ranks by <b>score</b>, which also factors in how sure the system is about you.</span></li>
-        <li><span class="hi" aria-hidden="true">3</span><span><b>Monthly seasons.</b> Ratings partly reset on the 1st, and the top score with ${MIN_CHAMP_GAMES}+ battles at month's end is champion.</span></li>
+        <li><span class="hi" aria-hidden="true">2</span><span><b>Ranked Points, not just wins.</b> Beating stronger players and winning by more crowns earns more RP. RP also factors in how sure the system is about you, so your first ${PLACEMENT_HINT} or so battles are placements before it shows.</span></li>
+        <li><span class="hi" aria-hidden="true">3</span><span><b>Ranks and seasons.</b> RP puts you in a rank, Wood up to Champion, with three divisions each. On the 1st everything partly resets, and the most RP with ${MIN_CHAMP_GAMES}+ battles at month's end is champion.</span></li>
         <li><span class="hi" aria-hidden="true">4</span><span>Tap any player, match or rivalry to dig in.</span></li>
       </ul>`,
       `<a class="btn" href="#about" data-act="close-nav">Full guide &amp; FAQ</a><button class="btn primary" type="button" data-act="close">Got it</button>`);
@@ -1122,7 +1192,7 @@ function introHtml(data, L, reason) {
   if (prevKey && (reason === 'season' || !view.ms.length)) { view = L.byKey[prevKey]; caption = `${seasonLabel(prevKey)} final`; }
   const champ = reason === 'season' && prevKey ? L.champions.find(c => c.key === prevKey) : null;
   const champP = champ && data.players[champ.id];
-  const ranked = ranking(data, view).filter(p => view.st[p.id].games > 0);
+  const ranked = ranking(data, view).filter(p => isPlaced(view.st[p.id]));
   const top3 = ranked.slice(0, 3);
   const players = Object.values(data.players).filter(p => !p.archived).length;
   // Streaks are about right now, so they come from the current season even when the podium shows last month.
@@ -1138,12 +1208,12 @@ function introHtml(data, L, reason) {
     const s = view.st[p.id];
     return `<a class="pod p${place}" href="#p-${esc(p.id)}" data-act="enter-to" data-href="#p-${esc(p.id)}">
       ${place === 1 ? CROWN.replace('class="crown"', 'class="crown-top"') : ''}
-      ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="rt num">${R(s.score)}</span>
+      ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="rt num">${R(s.score)}</span>${rankChip(s, ' pod-rk')}
       <div class="block">${place}</div></a>`;
   };
   const podium = top3.length
     ? `<div class="podium-wrap"><div class="pod-cap">${esc(caption)}</div><div class="podium" aria-label="Top three">${pod(top3[1], 2)}${pod(top3[0], 1)}${pod(top3[2], 3)}</div></div>`
-    : `<div class="podium"><div class="throne"><b>The throne is empty</b>${players ? 'First friendly of the season decides who sits here.' : 'Add your crew and play a friendly to crown a champion.'}</div></div>`;
+    : `<div class="podium"><div class="throne"><b>The throne is empty</b>${players ? 'Finish your placement battles to claim a spot.' : 'Add your crew and play a friendly to crown a champion.'}</div></div>`;
 
   const recent = L.all.ms.slice(-8).reverse().map(m => {
     const A = data.players[m.a], B = data.players[m.b];
@@ -1159,9 +1229,9 @@ function introHtml(data, L, reason) {
         <div class="eyebrow">${reason === 'season' ? `<span class="newseason">New season</span> · ${esc(seasonLabel(L.currentKey))}` : `Clash Royale friendly battles · ${esc(seasonLabel(L.currentKey))} season`}</div>
         <h1 class="intro-title">${title}</h1>
         ${reason === 'season' && prevKey ? `<p class="intro-sub">${champP
-          ? `${MEDAL}<b>${esc(champP.name)}</b> is the ${esc(seasonLabel(prevKey))} champion, finishing with a score of <b>${R(champ.score ?? champ.r)}</b>. A new season starts now: every rating moved halfway back to 1500, so the first few battles are placements.`
-          : `${esc(seasonLabel(prevKey))} is over. Nobody played the ${MIN_CHAMP_GAMES} battles needed to be crowned, so the title is up for grabs. Every rating moved halfway back to 1500 for the new season.`}</p>`
-        : `<p class="intro-sub">${L.all.ms.length ? `<b>${players}</b> players, <b>${L.all.ms.length}</b> battles and one crown per month.${lastChamp ? ` Last season's champ: <b>${esc(lastChamp.name)}</b>.` : ' Every friendly counts, and the battle log keeps score.'}` : 'Every friendly counts. Battles between league members are tracked automatically and settled by rating.'}</p>`}
+          ? `${MEDAL}<b>${esc(champP.name)}</b> is the ${esc(seasonLabel(prevKey))} champion, finishing on <b>${R(champ.score ?? champ.r)} RP</b>. A new season starts now: skill moved halfway back to 1500 and everyone replays placements before their RP shows.`
+          : `${esc(seasonLabel(prevKey))} is over. Nobody played the ${MIN_CHAMP_GAMES} battles needed to be crowned, so the title is up for grabs. Skill moved halfway back to 1500 for the new season, and everyone replays placements.`}</p>`
+        : `<p class="intro-sub">${L.all.ms.length ? `<b>${players}</b> players, <b>${L.all.ms.length}</b> battles and one crown per month.${lastChamp ? ` Last season's champ: <b>${esc(lastChamp.name)}</b>.` : ' Every friendly counts, and the battle log keeps score.'}` : 'Every friendly counts. Battles between league members are tracked automatically and settled in Ranked Points.'}</p>`}
         <div class="intro-actions"><button class="btn primary big" type="button" data-act="enter">Enter the league <span class="arr" aria-hidden="true">→</span></button><a class="intro-about" href="#about" data-act="enter-to" data-href="#about">How it works</a></div>
         <div class="intro-facts">
           <div><span class="v">${esc(daysLeft(L).replace(' left', ''))}</span><span class="k">Left this season</span></div>
@@ -1424,7 +1494,7 @@ function matchDialog(id, presetPlayer) {
       <label class="f" for="mMode">Mode<select id="mMode">${modes.map(x => `<option${(m ? m.mode : 'Classic') === x ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>
     </div>
     <label class="f" for="mNotes">Notes (optional)<input id="mNotes" type="text" maxlength="200" value="${esc(m ? m.notes : '')}" placeholder="Last-second log bait, rematch tomorrow…"></label>
-    <label class="check" for="mRanked"><input id="mRanked" type="checkbox"${!m || m.ranked ? ' checked' : ''}> Counts toward ratings</label>
+    <label class="check" for="mRanked"><input id="mRanked" type="checkbox"${!m || m.ranked ? ' checked' : ''}> Counts toward RP</label>
     <div class="preview" id="mPrev" aria-live="polite"></div>
     <div class="err" id="mErr" role="alert"></div>`,
     `<button class="btn" type="button" data-act="close">Cancel</button><button class="btn primary" type="submit">${m ? 'Save match' : 'Log match'}</button>`,
@@ -1449,15 +1519,16 @@ function matchDialog(id, presetPlayer) {
         q('#tbBox').hidden = st.ca !== st.cb;
         form.querySelectorAll('input[name=tie]').forEach(r => { r.checked = r.value === st.tie; });
         const prev = q('#mPrev');
-        if (!st.a || !st.b || st.a === st.b) { prev.innerHTML = 'Pick two different players to see the rating change.'; return; }
+        if (!st.a || !st.b || st.a === st.b) { prev.innerHTML = 'Pick two different players to see the RP change.'; return; }
         const nm = build();
-        if (!nm.ranked) { prev.innerHTML = 'This match is recorded but won’t change anyone’s rating.'; return; }
+        if (!nm.ranked) { prev.innerHTML = 'This match is recorded but won’t change anyone’s RP.'; return; }
         // Replay the league with this match in it to get the exact change, season resets included.
         const sim = league({ players: D().players, matches: { ...D().matches, [nm.id]: nm } });
         const dl = sim.byKey[seasonKey(nm.playedAt, tz())]?.delta[nm.id];
         if (!dl) { prev.innerHTML = 'Pick a date that isn’t in the future.'; return; }
         const A = D().players[st.a], B = D().players[st.b];
-        prev.innerHTML = `Win chance before: <b>${esc(A.name)}</b> ${fmtPct(dl.pA)} · <b>${esc(B.name)}</b> ${fmtPct(1 - dl.pA)}<br>Rating change: <b>${esc(A.name)}</b> <span class="${dCls(dl.a)}">${fmtD(dl.a)}</span> (from ${R(dl.preA)}) · <b>${esc(B.name)}</b> <span class="${dCls(dl.b)}">${fmtD(dl.b)}</span> (from ${R(dl.preB)})`;
+        const chg = (name, rpd, rp0) => `<b>${esc(name)}</b> ${rpd != null ? `<span class="${dCls(rpd)}">${fmtD(rpd)}</span> RP (from ${R(rp0)})` : '<span class="muted">placing</span>'}`;
+        prev.innerHTML = `Win chance before: <b>${esc(A.name)}</b> ${fmtPct(dl.pA)} · <b>${esc(B.name)}</b> ${fmtPct(1 - dl.pA)}<br>Change: ${chg(A.name, dl.rpA, dl.rp.a0)} · ${chg(B.name, dl.rpB, dl.rp.b0)}`;
       };
       form.addEventListener('click', e => {
         const c = e.target.closest('[data-crown]'), n = e.target.closest('[data-cnt]');

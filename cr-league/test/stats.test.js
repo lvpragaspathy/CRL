@@ -86,7 +86,7 @@ test('race, records and weekly recap on a computed league', () => {
   const r = race(data, L, L.currentKey, 'America/Chicago');
   assert.equal(r.series.length, 2);
   assert.equal(r.series[0].id, 'x', 'leader first');
-  assert.equal(r.series[0].pts[0].r, 1500);
+  assert.equal(r.series[0].pts[0].r, 800, 'opens at the starting RP (1500 − 2×350)');
   const rec = records(data, L, 'America/Chicago');
   assert.equal(rec.find(x => x.key === 'streak').value, '2 wins');
   assert.equal(rec.find(x => x.key === 'three').value, '4 three-crowns');
