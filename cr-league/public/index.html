@@ -689,6 +689,19 @@ select option{background:var(--panel);color:var(--ink)}
   .intro .ticker{padding-top:calc(12px + env(safe-area-inset-top))}
   .top{padding-top:calc(16px + env(safe-area-inset-top))}
 }
+
+/* Long deck-type names ("Royal Giant + Skeleton Barrel") wrap instead of pushing tables off screen */
+td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:7em}
+.cardcols table{width:100%}
+
+.g-short{display:none}
+@media (max-width:420px){
+  .g-long{display:none} .g-short{display:inline}
+  td.wrap{min-width:0}
+  table.compact.tilt .pl .nm{max-width:72px}
+  table.compact.tilt .chip{padding:2px 6px;font-size:11px}
+  table.compact td,table.compact th{padding:7px 4px}
+}
 </style>
 </head>
 <body>

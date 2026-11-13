@@ -483,7 +483,7 @@ function rivalryPanel(data, L, view) {
       ${momentumChart(data, A, B, all) || '<p class="muted" style="margin:0">Needs at least 2 battles.</p>'}
       ${mus.length ? `<h3 class="sub" style="margin-top:18px">Deck matchups</h3>
         <div class="table-wrap"><table class="compact"><thead><tr><th>${esc(A.name)} played</th><th>${esc(B.name)} played</th><th class="r">Battles</th><th class="r">${esc(A.name)}</th></tr></thead><tbody>
-        ${mus.map(o => `<tr><td><b>${esc(o.a)}</b></td><td>${esc(o.b)}</td><td class="num r">${o.n}</td><td class="num r ${o.w > o.l ? 'up' : o.w < o.l ? 'down' : ''}">${rec(o)}</td></tr>`).join('')}
+        ${mus.map(o => `<tr><td class="wrap"><b>${esc(o.a)}</b></td><td class="wrap">${esc(o.b)}</td><td class="num r">${o.n}</td><td class="num r ${o.w > o.l ? 'up' : o.w < o.l ? 'down' : ''}">${rec(o)}</td></tr>`).join('')}
         </tbody></table></div>` : ''}
       <h3 class="sub" style="margin-top:18px">Every battle (${all.length})</h3>
       <div class="mlist">${shown.map(m => matchRow(m, data, view0)).join('')}</div>
@@ -771,7 +771,7 @@ function viewStats(data, L, view) {
   const leakTbl = lk.length ? `<table class="compact"><thead><tr><th>Player</th><th class="r">Leaked / game</th><th class="r">In wins</th><th class="r">In losses</th></tr></thead><tbody>
     ${lk.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num r"><span class="leakbar"><i style="width:${Math.min(100, r.avg * 10)}%"></i></span>${r.avg.toFixed(1)}</td><td class="num r">${r.avgWin == null ? '—' : r.avgWin.toFixed(1)}</td><td class="num r">${r.avgLoss == null ? '—' : r.avgLoss.toFixed(1)}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with elixir data.</p>';
-  const tiltCell = (rate, o, cls = '') => `<td class="num r ${cls}">${pctOrDash(rate)}<span class="games">${o.n} game${o.n === 1 ? '' : 's'}</span></td>`;
+  const tiltCell = (rate, o, cls = '') => `<td class="num r ${cls}">${pctOrDash(rate)}<span class="games"><span class="g-long">${o.n} game${o.n === 1 ? '' : 's'}</span><span class="g-short">(${o.n})</span></span></td>`;
   const tiltTbl = tl.length ? `<table class="compact tilt"><thead><tr><th>Player</th><th class="r">After a win</th><th class="r">After a loss</th><th class="r hide-md">1st game of a session</th><th class="r hide-md">Later games</th><th>Verdict</th></tr></thead><tbody>
     ${tl.map(r => {
       const gap = r.afterWRate != null && r.afterLRate != null ? r.afterWRate - r.afterLRate : null;
@@ -781,10 +781,10 @@ function viewStats(data, L, view) {
     }).join('')}
     </tbody></table><p class="muted chart-note">Win rate in each situation. A new session starts after a ${SESSION_GAP_MIN}+ minute break. "Tilts" means 20+ points worse after a loss than after a win (3+ games after a loss); "Resilient" is the reverse.</p>` : '<p class="muted" style="margin:0">Not enough games yet.</p>';
   const metaHtml = mt.decks ? `<div class="cardcols">
-      <div><h3 class="sub">Archetypes</h3><table><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
-        ${mt.archetypes.slice(0, 10).map(a => `<tr><td><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
+      <div class="table-wrap"><h3 class="sub">Archetypes</h3><table class="compact"><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
+        ${mt.archetypes.slice(0, 10).map(a => `<tr><td class="wrap"><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
       </tbody></table></div>
-      <div><h3 class="sub">Most played cards</h3><table class="ctable"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
+      <div class="table-wrap"><h3 class="sub">Most played cards</h3><table class="ctable compact"><thead><tr><th>Card</th><th class="r">In decks</th><th class="r">Win %</th></tr></thead><tbody>
         ${mt.cards.slice(0, 12).map(c => `<tr><td><span class="cname">${cardTile(c.card, ' sm')}<span>${esc(c.card.name)}</span></span></td><td class="r"><span class="usebar"><i style="width:${Math.round(c.usage * 100)}%"></i></span><span class="num">${fmtPct(c.usage)}</span></td><td class="r num ${c.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(c.rate)}</td></tr>`).join('')}
       </tbody></table></div>
     </div><p class="muted chart-note">From ${mt.decks} decks in auto-imported battles. Archetypes are named by their win conditions.</p>` : '<p class="muted" style="margin:0">Deck data fills in from auto-imported battles.</p>';
