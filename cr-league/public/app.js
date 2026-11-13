@@ -55,9 +55,14 @@ const initials = n => (String(n).trim().split(/\s+/).map(w => w[0]).join('').sli
 function fmtDate(ms, withTime = true) {
   if (!ms) return withTime ? { day: '—', time: '' } : '—';
   const d = new Date(ms);
-  const day = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
-  return withTime ? { day, time: d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) } : day;
+  const day = (d.getFullYear() === THIS_YEAR ? DAY_FMT : DAY_Y_FMT).format(d);
+  return withTime ? { day, time: TIME_FMT.format(d) } : day;
 }
+// Formatters are built once; toLocaleDateString builds a new one on every call, which adds up over a long match log.
+const THIS_YEAR = new Date().getFullYear();
+const DAY_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+const DAY_Y_FMT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+const TIME_FMT = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 function ago(ms) {
   if (!ms) return 'never';
   const s = Math.max(0, (Date.now() - ms) / 1000);
@@ -141,9 +146,9 @@ function demoPut(coll, obj) {
   if (!obj.id) obj.id = 'demo' + Math.random().toString(36).slice(2, 9);
   if (!obj.createdAt) obj.createdAt = Date.now();
   S.demo[coll][obj.id] = { ...(S.demo[coll][obj.id] || {}), ...obj };
-  render(); return Promise.resolve(true);
+  leagueMemo = null; render(); return Promise.resolve(true);
 }
-function demoDel(coll, id) { delete S.demo[coll][id]; render(); return Promise.resolve(true); }
+function demoDel(coll, id) { delete S.demo[coll][id]; leagueMemo = null; render(); return Promise.resolve(true); }
 
 /* ---------- small renderers ---------- */
 const avatar = (p, lg) => `<span class="av${lg ? ' lg' : ''}" style="background:${esc(p.color)}" aria-hidden="true">${esc(initials(p.name))}</span>`;
@@ -777,10 +782,11 @@ function recordCard(data, r) {
 function viewStats(data, L, view) {
   if (!Object.keys(data.players).length) return viewEmpty();
   const key = S.season === 'all' ? 'all' : (S.season || L.currentKey);
-  const RC = race(data, L, key, tz());
-  const rec = records(data, L, tz());
-  const cl = clutch(data, view), lk = leaks(data, view), tl = tilt(data, view).filter(r => r.afterW.n + r.afterL.n >= 2);
-  const mt = meta(data, view), hm = heatmap(view, tz());
+  const RC = memo('race|' + key, () => race(data, L, key, tz()));
+  const rec = memo('records', () => records(data, L, tz()));
+  const cl = memo('clutch|' + key, () => clutch(data, view)), lk = memo('leaks|' + key, () => leaks(data, view));
+  const tl = memo('tilt|' + key, () => tilt(data, view)).filter(r => r.afterW.n + r.afterL.n >= 2);
+  const mt = memo('meta|' + key, () => meta(data, view)), hm = memo('heat|' + key, () => heatmap(view, tz()));
   const hpGames = view.ms.filter(m => hpInfo(m)).length;
 
   const clutchTbl = cl.length ? `<table class="compact"><thead><tr><th>Player</th><th>Close games</th><th class="r">Win %</th><th class="r" title="Average remaining tower HP minus the opponent's">HP edge</th></tr></thead><tbody>
@@ -888,7 +894,9 @@ async function drawRecap(data, L) {
   x.fillStyle = '#8e9bc1'; x.font = `500 24px ${BODY}`; x.fillText(location.host || 'friendly battle league', 70, H - 50);
   const copy = document.getElementById('recapCopy');
   if (copy && !(window.ClipboardItem && navigator.clipboard?.write)) copy.hidden = true;
-  recapReady = null; recapBlob().then(b => { recapReady = b; });
+  // Encode the PNG a moment later so it never competes with opening the page.
+  recapReady = null; clearTimeout(drawRecap._t);
+  drawRecap._t = setTimeout(() => recapBlob().then(b => { recapReady = b; }), 700);
 }
 // toBlob returns nothing and calls back later, so it can't be chained with ?? (that resolved null every time).
 function recapBlob() {
@@ -1106,7 +1114,19 @@ function enterLeague(hash = '#standings') {
 }
 
 const tz = () => (S.demo ? 'America/Chicago' : S.tz);
-function league(data) { return computeLeague(data, { tz: tz(), now: Date.now() }); }
+// Ratings only change when the data does, so switching tabs reuses the last result (refreshed each minute for idle-time drift).
+let leagueMemo = null;
+function league(data) {
+  const now = Date.now(), k = `${tz()}|${Math.floor(now / 60000)}`;
+  if (!leagueMemo || leagueMemo.data !== data || leagueMemo.k !== k) leagueMemo = { data, k, L: computeLeague(data, { tz: tz(), now }), memo: new Map() };
+  return leagueMemo.L;
+}
+// Cache a derived stat for as long as the current league result lives.
+function memo(key, fn) {
+  const m = leagueMemo?.memo; if (!m) return fn();
+  if (!m.has(key)) m.set(key, fn());
+  return m.get(key);
+}
 function pickView(L) {
   if (S.season === 'all') return L.all;
   return L.byKey[S.season] || L.byKey[L.currentKey];
@@ -1138,6 +1158,7 @@ function render() {
     if (a.dataset.tab === r.v || (r.v === 'player' && a.dataset.tab === 'standings')) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+  syncInd();
   if (!ready) {
     $('#view').innerHTML = S.error ? `<div class="loading">${esc(S.error)}</div>` : '<div class="loading">Loading the league…</div>';
     return;
@@ -1151,7 +1172,77 @@ function render() {
   if (focusId && ['seasonSel', 'filterSel', 'predA', 'predB'].includes(focusId)) document.getElementById(focusId)?.focus();
 }
 PHONE_MQ.addEventListener('change', () => { if (!dlg.open) render(); });
-window.addEventListener('hashchange', () => { S.matchLimit = 50; render(); window.scrollTo(0, 0); });
+/* ---------- page transitions ---------- */
+const TAB_ORDER = ['standings', 'matches', 'rivalries', 'stats', 'lab'];
+const tabOf = r => (r.v === 'player' ? 'standings' : r.v);
+let navPrev = route();
+function animateView(dir) {
+  const v = $('#view'); if (!dir || !v.animate) return;
+  v.classList.remove('nav-fwd', 'nav-back', 'nav-fade'); void v.offsetWidth;   // restart if one is mid-flight
+  v.classList.add('nav-' + dir);
+  v.addEventListener('animationend', () => v.classList.remove('nav-' + dir), { once: true });
+}
+window.addEventListener('hashchange', () => {
+  S.matchLimit = 50;
+  const from = navPrev, to = route(); navPrev = to;
+  render(); window.scrollTo(0, 0);
+  if (from.v === 'welcome' || to.v === 'welcome') return;
+  const a = TAB_ORDER.indexOf(tabOf(from)), b = TAB_ORDER.indexOf(tabOf(to));
+  animateView(b > a ? 'fwd' : b < a ? 'back' : 'fade');
+});
+
+/* ---------- phone tab bar: a glass indicator that slides to the tab you tap, or follows your finger ---------- */
+const bar = $('nav.bottombar'), ind = bar.querySelector('.bb-ind'), barTabs = [...bar.querySelectorAll('a')];
+let barDrag = null, barClickAt = -1e9;
+function placeInd(el, animate = true) {
+  if (!el || !el.offsetWidth) return;                       // bar hidden (desktop)
+  const first = !bar.classList.contains('has-ind');
+  if (first || !animate) bar.classList.add('no-anim');
+  ind.style.setProperty('--x', el.offsetLeft + 'px'); ind.style.setProperty('--w', el.offsetWidth + 'px');
+  bar.classList.add('has-ind');
+  if (first || !animate) { void ind.offsetWidth; bar.classList.remove('no-anim'); }
+}
+function syncInd(animate = true) { if (!barDrag) placeInd(bar.querySelector('a[aria-current="page"]'), animate); }
+const tabAt = x => barTabs.reduce((best, t) => { const r = t.getBoundingClientRect(), d = Math.abs(x - (r.left + r.width / 2)); return !best || d < best.d ? { t, d } : best; }, null)?.t;
+const setHot = t => barTabs.forEach(x => x.classList.toggle('hot', x === t));
+function barEnd(go) {
+  if (!barDrag) return;
+  const target = go ? barDrag.hot : null;
+  try { bar.releasePointerCapture(barDrag.id); } catch { /* already released */ }
+  barDrag = null; bar.classList.remove('pressing', 'dragging'); setHot(null);
+  if (!target) { syncInd(); return; }
+  barClickAt = performance.now();
+  placeInd(target);
+  const href = target.getAttribute('href');
+  if (location.hash !== href) location.hash = href;        // hashchange renders the page and re-syncs the bar
+  else { window.scrollTo({ top: 0, behavior: 'smooth' }); syncInd(); }   // tapping the tab you're on scrolls to the top
+}
+bar.addEventListener('pointerdown', e => {
+  if (barDrag || (e.pointerType === 'mouse' && e.button !== 0)) return;
+  const t = tabAt(e.clientX); if (!t) return;
+  barDrag = { id: e.pointerId, x0: e.clientX, moved: false, hot: t };
+  try { bar.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
+  bar.classList.add('pressing'); setHot(t); placeInd(t);    // instant feedback, before the page has even changed
+});
+bar.addEventListener('pointermove', e => {
+  if (!barDrag || e.pointerId !== barDrag.id) return;
+  if (!barDrag.moved && Math.abs(e.clientX - barDrag.x0) < 8) return;
+  barDrag.moved = true; bar.classList.add('dragging');
+  const r = bar.getBoundingClientRect(), w = barTabs[0].offsetWidth;
+  const lo = barTabs[0].offsetLeft, hi = barTabs[barTabs.length - 1].offsetLeft;
+  // Past either end the lens resists, like a rubber band
+  let x = e.clientX - r.left - bar.clientLeft - w / 2;
+  x = x < lo ? lo - Math.min(10, (lo - x) * 0.25) : x > hi ? hi + Math.min(10, (x - hi) * 0.25) : x;
+  ind.style.setProperty('--x', x + 'px');
+  const t = tabAt(e.clientX); if (t !== barDrag.hot) { barDrag.hot = t; setHot(t); }
+});
+bar.addEventListener('pointerup', e => { if (barDrag && e.pointerId === barDrag.id) barEnd(true); });
+bar.addEventListener('pointercancel', e => { if (barDrag && e.pointerId === barDrag.id) barEnd(false); });
+// The pointer handlers already navigated; this stops the link's own click from doing it twice. Keyboard clicks pass through.
+bar.addEventListener('click', e => { if (performance.now() - barClickAt < 400) e.preventDefault(); });
+bar.addEventListener('dragstart', e => e.preventDefault());
+window.addEventListener('resize', () => syncInd(false));
+document.fonts?.ready.then(() => syncInd(false));
 
 /* ---------- dialogs ---------- */
 const dlg = $('#dlg');

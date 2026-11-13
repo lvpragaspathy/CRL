@@ -169,7 +169,9 @@ function allDeltas(L) {
 }
 export function records(data, L, tz) {
   const ms = L.all.ms, deltas = allDeltas(L), P = data.players, out = [];
-  const dayKey = t => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(t));
+  // One formatter for the whole pass: building an Intl formatter per match was the slowest thing on the Stats page.
+  const dayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dayKey = t => dayFmt.format(new Date(t));
   const add = (o) => { if (o) out.push(o); };
 
   // Longest win streak, all time
