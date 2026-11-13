@@ -7,14 +7,14 @@ export async function createPgStore(url, { ssl = false } = {}) {
   const q = (text, params) => pool.query(text, params);
 
   const toPlayer = r => r && ({
-    id: r.id, name: r.name, tag: r.tag, color: r.color, deck: r.deck, archived: r.archived, createdAt: r.created_at,
+    id: r.id, name: r.name, tag: r.tag, color: r.color, deck: r.deck, archived: r.archived, createdAt: r.created_at, ladder: r.ladder || null,
   });
   const toMatch = r => r && ({
     id: r.id, a: r.a, b: r.b, ca: r.ca, cb: r.cb, winner: r.winner, playedAt: r.played_at, createdAt: r.created_at,
     mode: r.mode, notes: r.notes, ranked: r.ranked, source: r.source, battleKey: r.battle_key, tiebreak: r.tiebreak,
     deckA: r.deck_a || null, deckB: r.deck_b || null, stats: r.stats || null, deleted: r.deleted,
   });
-  const P_COLS = { name: 'name', tag: 'tag', color: 'color', deck: 'deck', archived: 'archived' };
+  const P_COLS = { name: 'name', tag: 'tag', color: 'color', deck: 'deck', archived: 'archived', ladder: 'ladder' };
   const M_COLS = {
     a: 'a', b: 'b', ca: 'ca', cb: 'cb', winner: 'winner', playedAt: 'played_at', mode: 'mode', notes: 'notes',
     ranked: 'ranked', source: 'source', battleKey: 'battle_key', tiebreak: 'tiebreak',
@@ -27,7 +27,7 @@ export async function createPgStore(url, { ssl = false } = {}) {
     if (!keys.length) return (await q(`SELECT * FROM ${table} WHERE id = $1`, [id])).rows[0];
     const sets = keys.map((k, i) => `${cols[k]} = $${i + 2}`).join(', ');
     const extra = table === 'matches' ? ' AND NOT deleted' : '';
-    const vals = keys.map(k => (['deckA', 'deckB', 'stats'].includes(k) ? jsonOrNull(fields[k]) : fields[k]));
+    const vals = keys.map(k => (['deckA', 'deckB', 'stats', 'ladder'].includes(k) ? jsonOrNull(fields[k]) : fields[k]));
     return (await q(`UPDATE ${table} SET ${sets} WHERE id = $1${extra} RETURNING *`, [id, ...vals])).rows[0];
   }
 
@@ -67,6 +67,7 @@ export async function createPgStore(url, { ssl = false } = {}) {
         ALTER TABLE matches ADD COLUMN IF NOT EXISTS deck_a JSONB;
         ALTER TABLE matches ADD COLUMN IF NOT EXISTS deck_b JSONB;
         ALTER TABLE matches ADD COLUMN IF NOT EXISTS stats JSONB;
+        ALTER TABLE players ADD COLUMN IF NOT EXISTS ladder JSONB;
         CREATE TABLE IF NOT EXISTS battles_raw (
           battle_key TEXT PRIMARY KEY,
           played_at BIGINT NOT NULL,

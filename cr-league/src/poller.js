@@ -83,12 +83,43 @@ export function createPoller({ store, config, log = console }) {
     return Array.isArray(data) ? data : [];
   }
 
+  async function fetchProfile(tag) {
+    const res = await fetch(`${config.crBase}/players/${encodeURIComponent(tag)}`, {
+      headers: { Authorization: `Bearer ${config.crToken}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new ApiError(res.status, explain(res.status, tag));
+    const d = await res.json();
+    return {
+      trophies: Number.isFinite(d.trophies) ? d.trophies : null,
+      best: Number.isFinite(d.bestTrophies) ? d.bestTrophies : null,
+      at: Date.now(),
+    };
+  }
+
+  /** Refresh ladder trophies for anyone whose snapshot is missing or older than profileMinutes. */
+  async function refreshProfiles(players, result) {
+    const stale = Date.now() - (config.profileMinutes || 60) * 60000;
+    for (const p of players) {
+      if (p.archived || !p.tag || (p.ladder && p.ladder.at > stale)) continue;
+      try {
+        const ladder = await fetchProfile(p.tag);
+        await store.updatePlayer(p.id, { ladder });
+        result.profiles++;
+      } catch (e) {
+        status.profileError = e.message; // shown nowhere prominent: trophies are a side detail
+        if (e.status === 401 || e.status === 403 || e.status === 503) break;
+      }
+      await sleep(200);
+    }
+  }
+
   async function runOnce() {
     if (!config.crToken) return status;
     if (status.running) return status;
     status.running = true;
     status.lastRunAt = Date.now();
-    const result = { checked: 0, found: 0, inserted: 0, linked: 0, enriched: 0 };
+    const result = { checked: 0, found: 0, inserted: 0, linked: 0, enriched: 0, profiles: 0 };
     const catalog = new Map();
     const errors = [];
     try {
@@ -114,6 +145,8 @@ export function createPoller({ store, config, log = console }) {
         await sleep(200);
       }
       result.found = parsed.size;
+      const authFailed = errors.some(e => /\(403\)/.test(e));
+      if (!authFailed) await refreshProfiles(players, result);
       if (catalog.size) await store.upsertCards([...catalog.values()]);
       // Oldest first, so ties in playedAt keep a stable order.
       for (const m of [...parsed.values()].sort((x, y) => x.playedAt - y.playedAt)) {

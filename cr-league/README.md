@@ -100,6 +100,8 @@ Ratings are never stored. The UI replays every match in time order (`public/rati
 
 **Crown margin.** Plain Glicko-2 only sees win/draw/loss, so the rating move (μ' − μ) is multiplied by `1 + bonus × 2(1 − p)`, where bonus is 0 / 0.15 / 0.30 for a 1/2/3-crown margin and p is the winner's pre-game win chance. Even game: ×1.00 / ×1.15 / ×1.30. The surprise weighting stops favorites from snowballing by stomping weaker players (the same autocorrelation problem FiveThirtyEight's Elo corrects for). RD and volatility are untouched, so a big margin moves ratings further without making the system more certain. Tiebreaker wins and draws use ×1.
 
+**Score (what rankings use)** = rating − 2·RD, roughly the rating the system is 95% sure you're at least at. Standings, tiers, champions, the podium and the recap all rank by score, so a lucky first game can't top the table. Score drifts down slowly while someone is idle, because RD grows.
+
 **Win probability** for A vs B: `1 / (1 + exp(-g(√(φA² + φB²)) · (μA − μB)))`, where `g(φ) = 1/√(1 + 3φ²/π²)`. Two uncertain ratings pull the odds toward 50%. A win the model gave under 35% is marked as an upset.
 
 **Seasons** are calendar months in `LEAGUE_TIMEZONE`. At each rollover every rating moves halfway back to 1500 and RD is raised to at least 150, so the first few games of a month are placements. The champion is the highest rating at month's end with 5+ battles. The "All time" view runs the same model with no resets.
@@ -126,3 +128,12 @@ Checks the rating system against what actually happened, using the win chance it
 - **Log-loss and Brier score** vs a coin flip and vs plain Elo on the same battles.
 - **Calibration:** battles grouped by the favorite's predicted chance (50–60%, 60–70%, …) and how often favorites actually won.
 - **Tuning:** a grid search over τ, season carryover, the RD floor and margin strength (240 combinations). It fits on the oldest 70% of battles and reports log-loss on the newest 30%, so overfitting shows up as no gain on the held-out battles. Apply a winner by editing the constants in `public/rating.js`.
+
+## Sharing and the home screen
+
+- **Link previews:** `index.html` is served with Open Graph and Twitter tags filled in on the server (league name, current leader and score, battles this season), plus `public/icons/og-image.png`, so links unfurl in iMessage, Discord and the like. Image URLs are absolute, built from `X-Forwarded-Proto`/`X-Forwarded-Host` (Railway sets both). The summary is cached for 60 seconds.
+- **Home screen app:** `/manifest.webmanifest` (named after the league) plus `public/icons/` and the Apple meta tags. "Add to Home Screen" on iOS or Android opens the site full screen with the crown icon.
+
+## Deep links
+
+`#standings`, `#matches`, `#rivalries`, `#stats`, `#lab`, `#welcome`, `#p-<playerId>` for a profile, and `#r-<idA>-<idB>` for a rivalry.
