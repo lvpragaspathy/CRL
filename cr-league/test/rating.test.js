@@ -109,3 +109,33 @@ test('crown margin: bigger wins move ratings more, weighted by surprise', () => 
   near(three.delta.m.b, one.delta.m.b * 1.3, 1e-9, 'loser drops 1.3x too');
   near(three.st.x.rd, one.st.x.rd, 1e-9, 'RD unaffected');
 });
+
+test('conservative score: a hot start with high RD ranks below a proven player', async () => {
+  const { ranking, scoreOf } = await import('../public/rating.js');
+  const P = { vet: { id: 'vet', name: 'Vet' }, rook: { id: 'rook', name: 'Rook' }, foe: { id: 'foe', name: 'Foe' } };
+  const matches = {}; let t = Date.UTC(2026, 10, 2, 18);
+  // Vet: 30 games, mostly wins vs foe -> high rating, low RD
+  for (let i = 0; i < 30; i++) { const m = M(i % 4 ? 'vet' : 'foe', i % 4 ? 'foe' : 'vet', 1, 0, (t += 36e5)); matches[m.id] = m; }
+  // Rook: one win over vet in their first game -> big rating jump but very uncertain
+  { const m = M('rook', 'vet', 2, 0, (t += 36e5)); matches[m.id] = m; }
+  const L = computeLeague({ players: P, matches }, { tz: 'UTC', now: t + 1000 });
+  const v = L.byKey['2026-11'];
+  assert.ok(v.st.rook.r > v.st.vet.r, 'rook has the higher raw rating');
+  assert.ok(v.st.rook.rd > v.st.vet.rd, 'but is less certain');
+  near(v.st.rook.score, scoreOf(v.st.rook.r, v.st.rook.rd), 1e-9, 'score = r - 2RD');
+  assert.deepEqual(ranking({ players: P }, v).map(p => p.id).slice(0, 2), ['vet', 'rook'], 'proven player ranks first');
+  assert.ok(v.st.rook.lastScore != null && v.st.rook.scoreHist.length === 2);
+});
+
+test('pre-game ratings are the real "before" values for back-to-back games', () => {
+  const P = { x: { id: 'x' }, y: { id: 'y' } };
+  const t = Date.UTC(2026, 10, 5, 18);
+  const m1 = M('x', 'y', 1, 0, t), m2 = M('x', 'y', 1, 0, t + 600000); // 10 minutes apart: no idle days
+  const L = computeLeague({ players: P, matches: { [m1.id]: m1, [m2.id]: m2 } }, { tz: 'UTC', now: t + 7200000 });
+  const v = L.byKey['2026-11'];
+  const d1 = v.delta[m1.id], d2 = v.delta[m2.id];
+  assert.equal(d1.preA, START_R, 'first game starts from 1500');
+  near(d2.preA, d1.preA + d1.a, 1e-9, "second game's before = first game's after");
+  near(v.st.x.lastScore, v.st.x.scoreHist[2] - v.st.x.scoreHist[1], 1e-9, 'score change is not zero');
+  assert.ok(Math.abs(v.st.x.lastScore) > 0.5);
+});

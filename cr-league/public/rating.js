@@ -17,6 +17,10 @@ export const PROVISIONAL_RD = 110;    // above this a player is still in placeme
 export const SEASON_CARRY = 0.5;      // new season: ratings move halfway back to 1500...
 export const SEASON_RD_FLOOR = 150;   // ...and RD goes up to at least this (a few placement games)
 export const MIN_CHAMP_GAMES = 5;     // games in a season to be eligible for champion
+// Rankings use a conservative score: rating minus two RDs, roughly "we're 95% sure you're at least
+// this good". A hot start with few games can't top the table until the system is confident in it.
+export const SCORE_K = 2;
+export const scoreOf = (r, rd) => r - SCORE_K * rd;
 // Crown margin. Plain Glicko-2 only sees win/draw/loss, so the rating move (not RD or volatility) is
 // scaled by the margin. The bonus is weighted by how surprising the win was, so a heavy favorite
 // three-crowning a much weaker player doesn't snowball (same idea as FiveThirtyEight's Elo
@@ -140,7 +144,8 @@ export function seasonKeysBetween(fromKey, toKey) {
 export const byTime = (x, y) => x.playedAt - y.playedAt || (x.createdAt || 0) - (y.createdAt || 0) || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
 
 function blankStats(id, r, rd) {
-  return { id, r, rd, games: 0, ranked: 0, w: 0, l: 0, d: 0, cf: 0, ca: 0, three: 0, peak: r, hist: [r], rdHist: [rd],
+  const sc = scoreOf(r, rd);
+  return { id, r, rd, score: sc, lastScore: null, scoreHist: [sc], games: 0, ranked: 0, w: 0, l: 0, d: 0, cf: 0, ca: 0, three: 0, peak: r, hist: [r], rdHist: [rd],
     streakT: '', streakN: 0, best: 0, form: [], last: null, h2h: {} };
 }
 function tally(s, cf, ca, r, opp, d) {
@@ -179,8 +184,9 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
     while (mi < ms.length && keyOf(ms[mi]) === key) {
       const m = ms[mi++];
       const A = state[m.a], B = state[m.b];
-      const a0 = inflate(A, A.lastAt == null ? 0 : Math.floor((m.playedAt - A.lastAt) / DAY));
-      const b0 = inflate(B, B.lastAt == null ? 0 : Math.floor((m.playedAt - B.lastAt) / DAY));
+      // Copies: inflate() hands back the same object when no days passed, and A/B get updated below.
+      const a0 = { ...inflate(A, A.lastAt == null ? 0 : Math.floor((m.playedAt - A.lastAt) / DAY)) };
+      const b0 = { ...inflate(B, B.lastAt == null ? 0 : Math.floor((m.playedAt - B.lastAt) / DAY)) };
       const pA = winProb(a0, b0);
       let dA = null, dB = null, mult = null;
       if (m.ranked) {
@@ -192,9 +198,11 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
         dA = a1.r - a0.r; dB = b1.r - b0.r;
         Object.assign(A, a1, { lastAt: m.playedAt, played: true });
         Object.assign(B, b1, { lastAt: m.playedAt, played: true });
-        for (const [id, S, P] of [[m.a, st[m.a], A], [m.b, st[m.b], B]]) {
+        for (const [id, S, P, pre] of [[m.a, st[m.a], A, a0], [m.b, st[m.b], B, b0]]) {
           S.r = P.r; S.rd = P.rd; S.ranked++; S.peak = Math.max(S.peak, P.r);
           S.hist.push(P.r); S.rdHist.push(P.rd);
+          S.score = scoreOf(P.r, P.rd); S.scoreHist.push(S.score);
+          S.lastScore = S.score - scoreOf(pre.r, pre.rd);
           timeline[id].push({ t: m.playedAt, r: P.r, rd: P.rd, season: key });
         }
         st[m.a].last = dA; st[m.b].last = dB;
@@ -212,7 +220,8 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
   for (const id in state) {
     const s = state[id];
     current[id] = inflate(s, s.lastAt == null ? 0 : Math.floor((now - s.lastAt) / DAY));
-    if (lastView) lastView.st[id].rd = current[id].rd;
+    // Idle time raises RD, so the score drifts down slowly for players who stop playing.
+    if (lastView) { lastView.st[id].rd = current[id].rd; lastView.st[id].score = scoreOf(lastView.st[id].r, current[id].rd); }
   }
   return { views, timeline, current };
 }
@@ -258,8 +267,8 @@ export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), 
   for (const key of keys) {
     if (key >= nowKey) continue;
     const v = season.views[key];
-    const best = Object.values(v.st).filter(s => s.games >= MIN_CHAMP_GAMES).sort((a, b) => b.r - a.r)[0];
-    if (best) { champions.push({ key, id: best.id, r: best.r, games: best.games }); champCount[best.id] = (champCount[best.id] || 0) + 1; }
+    const best = Object.values(v.st).filter(s => s.games >= MIN_CHAMP_GAMES).sort((a, b) => b.score - a.score)[0];
+    if (best) { champions.push({ key, id: best.id, r: best.r, score: best.score, games: best.games }); champCount[best.id] = (champCount[best.id] || 0) + 1; }
   }
   const end = seasonStart(nextSeasonKey(nowKey), tz);
   return {
@@ -276,20 +285,21 @@ export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), 
 }
 
 /* ---------- presentation helpers ---------- */
+/** Tiers go by score (rating − 2·RD); anyone the system is still unsure about is in placements. */
 export function tier(s) {
   if (!s.games) return { name: 'Unranked', cls: 't-place' };
   if (s.rd > PROVISIONAL_RD) return { name: 'Placement', cls: 't-place' };
-  const r = s.r;
-  if (r >= 1750) return { name: 'Champion', cls: 't-champ' };
-  if (r >= 1650) return { name: 'Diamond', cls: 't-diamond' };
-  if (r >= 1550) return { name: 'Gold', cls: 't-gold' };
-  if (r >= 1450) return { name: 'Silver', cls: 't-silver' };
+  const v = s.score ?? scoreOf(s.r, s.rd);
+  if (v >= 1600) return { name: 'Champion', cls: 't-champ' };
+  if (v >= 1500) return { name: 'Diamond', cls: 't-diamond' };
+  if (v >= 1400) return { name: 'Gold', cls: 't-gold' };
+  if (v >= 1300) return { name: 'Silver', cls: 't-silver' };
   return { name: 'Bronze', cls: 't-bronze' };
 }
 export function ranking(data, view) {
   return Object.values(data.players).filter(p => !p.archived && view.st[p.id]).sort((x, y) => {
     const a = view.st[x.id], b = view.st[y.id];
-    return (b.games > 0) - (a.games > 0) || b.r - a.r || b.games - a.games || x.name.localeCompare(y.name);
+    return (b.games > 0) - (a.games > 0) || b.score - a.score || b.r - a.r || b.games - a.games || x.name.localeCompare(y.name);
   });
 }
 export const pct = s => (s.games ? Math.round((100 * (s.w + 0.5 * s.d)) / s.games) + '%' : '—');

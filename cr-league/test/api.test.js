@@ -162,3 +162,19 @@ test('re-sync fills in elixir/HP stats on matches imported before stats existed'
   assert.equal(await ingestBattle(store, { ...base, stats }, { linkWindowMs: 0 }), 'exists');
   assert.equal(await store.countRaw(), 1);
 });
+
+test('link previews and home screen manifest', async () => {
+  const page = await (await fetch(base + '/', { headers: { 'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'league.example.app' } })).text();
+  assert.match(page, /<title>The Boys League<\/title>/, 'title is the league name (renamed by the import test)');
+  assert.match(page, /property="og:image" content="https:\/\/league\.example\.app\/icons\/og-image\.png"/);
+  assert.match(page, /property="og:description" content="[^"]*Leader: /, 'description names the current leader');
+  assert.doesNotMatch(page, /<!--SOCIAL-->/);
+  // A forged host header can't inject markup
+  const bad = await (await fetch(base + '/', { headers: { 'X-Forwarded-Host': 'evil.com"><script>' } })).text();
+  assert.doesNotMatch(bad, /evil\.com"/);
+  const mf = await (await fetch(base + '/manifest.webmanifest')).json();
+  assert.equal(mf.display, 'standalone');
+  assert.equal(mf.icons.length, 3);
+  const icon = await fetch(base + '/icons/icon-192.png');
+  assert.equal(icon.headers.get('content-type'), 'image/png');
+});

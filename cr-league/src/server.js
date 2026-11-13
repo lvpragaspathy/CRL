@@ -8,9 +8,10 @@ import { createMemoryStore } from './store-memory.js';
 import { createPgStore } from './store-pg.js';
 import { createPoller } from './poller.js';
 import { HttpError, playerInput, matchInput, isId, newId } from './validate.js';
+import { computeLeague, ranking, seasonLabel } from '../public/rating.js';
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../public');
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
 export async function createApp({ store, poller, cfg = config }) {
   const hash = s => createHash('sha256').update(String(s)).digest();
@@ -121,13 +122,82 @@ export async function createApp({ store, poller, cfg = config }) {
     }],
   ];
 
+  /* ----- link previews + home screen app ----- */
+  const escAttr = v => String(v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function originOf(req) {
+    const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    if (!/^[\w.-]+(:\d+)?$/.test(host) || !/^https?$/.test(proto)) return '';
+    return `${proto}://${host}`;
+  }
+  let summaryCache = { at: 0, val: null };
+  async function leagueSummary() {
+    if (summaryCache.val && Date.now() - summaryCache.at < 60000) return summaryCache.val;
+    const [league, players, matches] = await Promise.all([store.getLeague(), store.listPlayers(), store.listMatches()]);
+    const data = { players: Object.fromEntries(players.map(p => [p.id, p])), matches: Object.fromEntries(matches.map(m => [m.id, m])) };
+    let description = 'Clash Royale friendly battles between friends: ratings, monthly seasons and rivalries, tracked automatically.';
+    try {
+      const L = computeLeague(data, { tz: cfg.timezone || 'America/Chicago' });
+      const view = L.byKey[L.currentKey];
+      const leader = ranking(data, view).find(p => view.st[p.id].games > 0);
+      const n = view.ms.length, active = players.filter(p => !p.archived).length;
+      if (leader) description = `${seasonLabel(L.currentKey)} season · Leader: ${leader.name} (${Math.round(view.st[leader.id].score)}) · ${n} battle${n === 1 ? '' : 's'} this season · ${active} players`;
+    } catch (e) { console.error('league summary failed', e); }
+    summaryCache = { at: Date.now(), val: { name: league.name || 'Friendly Battle League', description } };
+    return summaryCache.val;
+  }
+  async function socialTags(req) {
+    const { name, description } = await leagueSummary();
+    const origin = originOf(req);
+    const img = `${origin}/icons/og-image.png`;
+    return { name, tags: [
+      `<meta name="description" content="${escAttr(description)}">`,
+      `<meta property="og:type" content="website">`,
+      `<meta property="og:site_name" content="${escAttr(name)}">`,
+      `<meta property="og:title" content="${escAttr(name)}">`,
+      `<meta property="og:description" content="${escAttr(description)}">`,
+      origin ? `<meta property="og:url" content="${escAttr(origin)}/">` : '',
+      `<meta property="og:image" content="${escAttr(img)}">`,
+      `<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">`,
+      `<meta property="og:image:alt" content="${escAttr(name)}: a crown over a podium">`,
+      `<meta name="twitter:card" content="summary_large_image">`,
+      `<meta name="twitter:title" content="${escAttr(name)}">`,
+      `<meta name="twitter:description" content="${escAttr(description)}">`,
+      `<meta name="twitter:image" content="${escAttr(img)}">`,
+    ].filter(Boolean).join('\n') };
+  }
+  async function manifest() {
+    const { name } = await leagueSummary();
+    return {
+      name, short_name: name.length > 12 ? 'League' : name,
+      description: 'Clash Royale friendly battle league: ratings, seasons and rivalries.',
+      start_url: '/', scope: '/', display: 'standalone',
+      background_color: '#0b1222', theme_color: '#0b1222',
+      icons: [
+        { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      ],
+    };
+  }
+
   async function serveStatic(req, res, pathname) {
+    if (pathname === '/manifest.webmanifest') {
+      res.writeHead(200, { 'Content-Type': TYPES['.webmanifest'], 'Cache-Control': 'no-cache' });
+      res.end(JSON.stringify(await manifest())); return;
+    }
     const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
     const file = path.resolve(PUBLIC_DIR, rel);
     if (!file.startsWith(PUBLIC_DIR + path.sep)) { res.writeHead(404).end(); return; }
     try {
-      const data = await readFile(file);
-      res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+      let data = await readFile(file);
+      const ext = path.extname(file);
+      if (rel === 'index.html') {
+        // Link-preview bots don't run JavaScript, so the league name and leader go into the HTML itself.
+        const { name, tags } = await socialTags(req);
+        data = data.toString('utf8').replace('<!--SOCIAL-->', tags).replace(/<title>[^<]*<\/title>/, `<title>${escAttr(name)}</title>`);
+      }
+      res.writeHead(200, { 'Content-Type': TYPES[ext] || 'application/octet-stream', 'Cache-Control': ext === '.png' ? 'public, max-age=86400' : 'no-cache' });
       res.end(req.method === 'HEAD' ? undefined : data);
     } catch {
       res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not found');
