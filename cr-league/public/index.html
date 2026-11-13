@@ -988,6 +988,36 @@ table.h2h .pl .nm{max-width:128px}
 
 /* ---------- by game mode ---------- */
 table.modes .mode-list{display:block;font-size:12px;font-weight:400;margin-top:2px}
+
+/* ---------- this is me ---------- */
+tbody tr.me td{background:rgba(74,144,255,.09)}
+tbody tr.me td:first-child{box-shadow:inset 3px 0 0 var(--blue)}
+.st-full tbody tr.me td{background:#1a2850}
+.unplaced-row.me{background:rgba(74,144,255,.09);border-radius:10px;padding-left:8px;padding-right:8px}
+.youchip{color:var(--blue);border-color:#2a4f8f;background:rgba(74,144,255,.1)}
+.linkbtn{background:none;border:0;color:var(--muted);font:inherit;font-size:12.5px;text-decoration:underline;text-underline-offset:2px;cursor:pointer;padding:0}
+.mebtn{padding:3px 10px;font-size:12px}
+.since{border-color:#2a4f8f;background:linear-gradient(135deg,rgba(74,144,255,.1),transparent 60%),var(--panel)}
+.since-h{display:flex;justify-content:space-between;align-items:center;margin:-6px -6px 4px 0}
+.since-h .iconbtn svg{width:18px;height:18px}
+.since-b{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center}
+.since-b ul{margin:0;padding:0;list-style:none;display:grid;gap:3px}
+.since-b li{color:var(--muted)} .since-b li b{color:var(--ink)} .since-b li b.up{color:var(--win)} .since-b li b.down{color:var(--loss)}
+.since-now{display:grid;justify-items:end;gap:4px}
+.since-now .rating{font-size:26px}
+.since-link{display:inline-block;margin-top:10px;font-weight:650;font-size:13.5px;text-decoration:none;color:var(--blue)}
+.since.compact{display:flex;align-items:center;gap:6px;padding:4px 6px 4px 14px}
+.since-line{flex:1;min-width:0;display:grid;gap:1px;text-decoration:none;color:var(--muted);padding:8px 0;font-size:14px}
+.since-line b{color:var(--ink)} .since-line b.up{color:var(--win)} .since-line b.down{color:var(--loss)}
+.since.compact .eyebrow{font-size:10.5px}
+.whoami{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;border-top:1px solid var(--line);padding:12px 18px 14px;font-size:13.5px}
+.whoami label{font-weight:700}
+.whoami select{max-width:220px}
+@media (max-width:560px){
+  .since-b{grid-template-columns:auto 1fr}
+  .since-now{grid-column:1/-1;grid-template-columns:auto auto;justify-content:start;align-items:center}
+  .whoami{padding:10px 12px 12px}
+}
 </style>
 </head>
 <body>

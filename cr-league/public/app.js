@@ -353,6 +353,78 @@ function sortTh(key, label, cls = '') {
   const arrow = on ? (dir === 'asc' ? '↑' : '↓') : '';
   return `<th class="sortable ${cls}" aria-sort="${aria}"><button type="button" data-act="sort" data-key="${key}">${label}<span class="sarr" aria-hidden="true">${arrow}</span></button></th>`;
 }
+/* ---------- "this is me" ---------- */
+// Each phone remembers who its owner is: their row is highlighted, the standings open with what changed since
+// their last visit, and a toast pops when their rank moves while the app is open. '-' means "just watching".
+const ME_KEY = 'crl-me', SNAP_KEY = 'crl-me-snap';
+const getMe = () => { try { return localStorage.getItem(ME_KEY) || ''; } catch { return ''; } };
+const setMe = id => { try { id ? localStorage.setItem(ME_KEY, id) : localStorage.removeItem(ME_KEY); localStorage.removeItem(SNAP_KEY); } catch { /* storage blocked */ } meSession = null; };
+const meId = () => { const id = getMe(); return id && id !== '-' && D().players[id] && !D().players[id].archived ? id : ''; };
+let meSession = null;   // { id, prev: snapshot from the last visit, dismissed, lastOrd }
+function meSnapshot(L, id) {
+  const s = L.byKey[L.currentKey].st[id], placed = isPlaced(s), k = rank(s);
+  return { id, at: Date.now(), season: L.currentKey, placed, rp: s.score, ord: placed ? k.ord : -1, label: k.label };
+}
+// Called on every render: remembers the previous visit once per page load, keeps the snapshot current, and toasts rank moves.
+function trackMe(L) {
+  const id = meId(); if (!id) return;
+  const now = meSnapshot(L, id);
+  if (!meSession || meSession.id !== id) {
+    let prev = null; try { prev = JSON.parse(localStorage.getItem(SNAP_KEY) || 'null'); } catch { /* bad json */ }
+    meSession = { id, prev: prev && prev.id === id ? prev : null, dismissed: false, lastOrd: now.ord };
+  } else if (now.ord !== meSession.lastOrd) {
+    const k = rank(L.byKey[L.currentKey].st[id]);
+    toast(meSession.lastOrd < 0 ? `You placed: ${k.label}` : now.ord > meSession.lastOrd ? `Promoted to ${k.label}` : `Dropped to ${k.label}`);
+    meSession.lastOrd = now.ord;
+  }
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify(now)); } catch { /* storage blocked */ }
+}
+// "Since your last visit": battles, record, RP and rank change, and who did the damage.
+function sinceHtml(data, L) {
+  const id = meId(), ses = meSession;
+  if (S.demo || !id || !ses || ses.dismissed || !ses.prev) return '';
+  const prev = ses.prev, cur = meSnapshot(L, id), view = L.byKey[L.currentKey];
+  const ms = L.all.ms.filter(m => (m.a === id || m.b === id) && m.playedAt > prev.at);
+  const newSeason = prev.season !== cur.season;
+  const rpD = !newSeason && prev.placed && cur.placed ? cur.rp - prev.rp : null;
+  if (!ms.length && !newSeason && (rpD == null || Math.abs(rpD) < 1) && prev.ord === cur.ord) return '';
+  const rec = { w: 0, l: 0, d: 0 }, beatBy = {}, beat = {};
+  for (const m of ms) {
+    const side = m.a === id ? 'a' : 'b', opp = m[side === 'a' ? 'b' : 'a'];
+    if (m.winner === 'draw') rec.d++; else if (m.winner === side) { rec.w++; beat[opp] = (beat[opp] || 0) + 1; } else { rec.l++; beatBy[opp] = (beatBy[opp] || 0) + 1; }
+  }
+  const times = n => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n}×`);
+  const top = o => Object.entries(o).sort((a, b) => b[1] - a[1])[0];
+  const lines = [];
+  if (newSeason) lines.push(`A new season started. ${cur.placed ? `You're placed at <b>${esc(cur.label)}</b>.` : 'Everyone replays placements.'}`);
+  if (ms.length) lines.push(`<b>${ms.length}</b> new battle${ms.length === 1 ? '' : 's'}, <b class="num">${rec.w}-${rec.l}${rec.d ? '-' + rec.d : ''}</b>`);
+  if (rpD != null && Math.abs(rpD) >= 1) lines.push(`<b class="num ${dCls(rpD)}">${fmtD(rpD)} RP</b>${!ms.length ? ' while you were away (RP slips when you don\'t play)' : ''}`);
+  if (!newSeason && cur.ord !== prev.ord) lines.push(prev.ord < 0 ? `Placed at <b>${esc(cur.label)}</b>` : cur.ord > prev.ord ? `Promoted to <b>${esc(cur.label)}</b>` : `Dropped to <b>${esc(cur.label)}</b>`);
+  const nem = top(beatBy), vic = top(beat);
+  if (nem) lines.push(`${esc(data.players[nem[0]]?.name || '?')} beat you ${times(nem[1])}`);
+  if (vic) lines.push(`you beat ${esc(data.players[vic[0]]?.name || '?')} ${times(vic[1])}`);
+  const s = view.st[id];
+  const x = '<svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4L12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></svg>';
+  // Phones keep the standings table near the top, so the card collapses to one line there.
+  if (narrow()) {
+    const bits = [ms.length ? `<b class="num">${rec.w}-${rec.l}${rec.d ? '-' + rec.d : ''}</b> in ${ms.length}` : '', rpD != null && Math.abs(rpD) >= 1 ? `<b class="num ${dCls(rpD)}">${fmtD(rpD)} RP</b>` : '',
+      !newSeason && cur.ord !== prev.ord ? `${cur.ord > prev.ord ? '▲' : '▼'} <b>${esc(cur.label)}</b>` : newSeason ? 'New season' : ''].filter(Boolean);
+    return `<section class="panel since compact"><a class="since-line" href="#p-${esc(id)}"><span class="eyebrow">Since last visit</span><span>${bits.join(' · ')}</span></a><button class="iconbtn" type="button" data-act="since-dismiss" aria-label="Dismiss">${x}</button></section>`;
+  }
+  return `<section class="panel since"><div class="panel-b">
+    <div class="since-h"><span class="eyebrow">Since your last visit</span><button class="iconbtn" type="button" data-act="since-dismiss" aria-label="Dismiss"><svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4L12 13.4 6.4 19 5 17.6 10.6 12 5 6.4z"/></svg></button></div>
+    <div class="since-b">${avatar(data.players[id])}<ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>
+    <div class="since-now">${isPlaced(s) ? `<span class="rating num">${R(s.score)}</span>${rankChip(s)}` : `<span class="muted">Placing · ${leftTxt(placing(s).left)}</span>`}</div></div>
+    <a class="since-link" href="#p-${esc(id)}">Your profile →</a>
+  </div></section>`;
+}
+// Nobody picked yet: one line under the table asking who they are.
+function whoAreYouHtml(data) {
+  if (getMe()) return '';
+  const ps = Object.values(data.players).filter(p => !p.archived).sort((a, b) => a.name.localeCompare(b.name));
+  if (!ps.length) return '';
+  return `<div class="whoami"><label for="meSel">Which one are you?</label><select id="meSel" data-act="me-pick"><option value="">Pick yourself…</option>${ps.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}<option value="-">Just watching</option></select><span class="muted">Highlights your row and shows what changed since your last visit.</span></div>`;
+}
 // Phones hide most stat columns; the full table opens every column in a sheet with the player column pinned.
 const ICON_EXPAND = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v2H7.4l3.3 3.3-1.4 1.4L6 7.4V10H4zm10 0h6v6h-2V7.4l-3.3 3.3-1.4-1.4L16.6 6H14zM4 14h2v2.6l3.3-3.3 1.4 1.4L7.4 18H10v2H4zm12.6 4-3.3-3.3 1.4-1.4 3.3 3.3V14h2v6h-6v-2z"/></svg>';
 let lastStandings = null;
@@ -370,6 +442,7 @@ function viewStandings(data, L, view) {
   const all = ranking(data, view);
   if (!Object.keys(data.players).length) return viewEmpty();
   const rows = all.filter(p => isPlaced(view.st[p.id]));
+  const me = meId();
   const unplaced = all.filter(p => !isPlaced(view.st[p.id]));
   const played = all.filter(p => view.st[p.id].games > 0);
   const leader = rows[0];
@@ -388,7 +461,7 @@ function viewStandings(data, L, view) {
   const shown = sortRows(rows, view);
   const body = shown.map(p => {
     const s = view.st[p.id], rk = place.get(p.id);
-    return `<tr class="link" data-href="#p-${esc(p.id)}">
+    return `<tr class="link${p.id === me ? ' me' : ''}" data-href="#p-${esc(p.id)}">
       <td class="rank${rk === 1 ? ' first' : ''}">${rk === 1 ? CROWN : ''}${rk}</td>
       <td><a class="pl" href="#p-${esc(p.id)}">${avatar(p)}<span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}${champChip(L, p.id)}</span>${p.tag ? `<span class="tag">${esc(p.tag)}</span>` : '<span class="tag">No tag, not auto-tracked</span>'}</span></a></td>
       <td>${ratingCell(s)}</td>
@@ -415,10 +488,12 @@ function viewStandings(data, L, view) {
     ${rows.length ? `<div class="panel-b table-wrap" style="padding-top:6px">
 ${tbl}    </div>` : `<div class="panel-b muted" style="padding-top:8px">Nobody is placed yet${L.seasons.length > 1 && view.key !== 'all' ? ' this season' : ''}. The table fills in as players finish their placement battles.</div>`}
     ${unplaced.length ? unplacedHtml(unplaced, view) : ''}
+    ${whoAreYouHtml(data)}
     ${retired.length ? `<div class="panel-b muted" style="padding-top:0;font-size:13.5px">Retired: ${retired.map(p => `<a href="#p-${esc(p.id)}">${esc(p.name)}</a>`).join(', ')}</div>` : ''}
   </section>`;
   // Phones lead with the table itself; the summary tiles follow it.
-  return seasonBar(L) + (narrow() ? table + strip : strip + table) + champs;
+  const since = view.key === L.currentKey ? sinceHtml(data, L) : '';
+  return seasonBar(L) + since + (narrow() ? table + strip : strip + table) + champs;
 }
 // Players the system isn't sure about yet: no RP, no rank, just how far along their placements are.
 // Placement status: battles still needed, and from a few games in, the rank they're projected to place at.
@@ -431,7 +506,7 @@ const leftTxt = n => `~${n} more battle${n === 1 ? '' : 's'}`;
 function unplacedHtml(list, view) {
   return `<div class="unplaced">
     <div class="unplaced-h"><span>Unplaced</span><span class="muted">RP and rank show after placements: about ${PLACEMENT_HINT} battles at first, ${REPLACE_HINT} each new season</span></div>
-    ${list.map(p => { const s = view.st[p.id], pl = placing(s); return `<a class="unplaced-row" href="#p-${esc(p.id)}">
+    ${list.map(p => { const s = view.st[p.id], pl = placing(s); return `<a class="unplaced-row${p.id === meId() ? ' me' : ''}" href="#p-${esc(p.id)}">
       ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}${pl.toward ? ` · <span class="proj">projected <span class="chip ${pl.toward.cls} sm">${pl.toward.name}</span></span>` : ''}</span></span>
       <span class="un-left">${leftTxt(pl.left)}</span>
     </a>`; }).join('')}
@@ -498,7 +573,7 @@ function momentumChart(data, A, B, ms) {
 function rivalryPanel(data, L, view) {
   const active = ranking(data, L.all).filter(p => L.all.st[p.id].games > 0);
   if (active.length < 2) return '';
-  if (!data.players[S.pa] || data.players[S.pa].archived) S.pa = active[0].id;
+  if (!data.players[S.pa] || data.players[S.pa].archived) S.pa = active.find(p => p.id === meId())?.id || active[0].id;
   if (!data.players[S.pb] || data.players[S.pb].archived || S.pb === S.pa) S.pb = active.find(p => p.id !== S.pa).id;
   const A = data.players[S.pa], B = data.players[S.pb];
   const la = L.live[A.id], lb = L.live[B.id];
@@ -756,7 +831,7 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
+        <div class="meta"><span class="chip ${k.cls}">${k.label}</span>${p.archived ? '' : meId() === id ? '<span class="chip youchip">You</span><button class="linkbtn" type="button" data-act="me-clear">Not me</button>' : `<button class="btn small mebtn" type="button" data-act="me-set" data-id="${esc(id)}">This is me</button>`}<span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
       <div class="big"><div class="k" title="${RP_HELP}">Ranked Points</div><div class="rating num${placed ? '' : ' muted'}">${placed ? R(s.score) : '—'}</div>
@@ -1344,6 +1419,7 @@ function render() {
     $('#view').innerHTML = S.error ? `<div class="loading">${esc(S.error)}</div>` : '<div class="loading">Loading the league…</div>';
     return;
   }
+  if (!S.demo) trackMe(L);
   const view = pickView(L);
   // Keep focus on the season picker across re-renders so keyboard users don't lose their place.
   const focusId = document.activeElement?.id;
@@ -1702,6 +1778,9 @@ document.addEventListener('click', async e => {
   const act = b.dataset.act, id = b.dataset.id, data = D();
   if (act === 'close') { closeDlg(); return; }
   if (act === 'standings-full') { standingsFull(); return; }
+  if (act === 'since-dismiss') { if (meSession) meSession.dismissed = true; b.closest('.since')?.remove(); return; }
+  if (act === 'me-set') { setMe(id); render(); toast(`Got it, you're ${data.players[id].name}. Your row is highlighted now.`); return; }
+  if (act === 'me-clear') { setMe(''); render(); return; }
   if (act === 'close-nav') { closeDlg(); return; } // link inside the sheet: close it and let the link navigate
   if (act === 'details') { matchDetail(id); return; }
   if (act === 'enter') { enterLeague(); return; }
@@ -1797,6 +1876,10 @@ document.addEventListener('change', e => {
   const id = e.target.id;
   if (id === 'filterSel') { S.filter = e.target.value; S.matchLimit = 50; render(); }
   else if (id === 'seasonSel') { S.season = e.target.value; S.matchLimit = 50; render(); }
+  else if (id === 'meSel' && e.target.value) {
+    const v = e.target.value; setMe(v); render();
+    if (v !== '-') toast(`Got it, you're ${D().players[v]?.name}. Your row is highlighted now.`);
+  }
   else if (id === 'predA' || id === 'predB') {
     const v = e.target.value, other = id === 'predA' ? 'pb' : 'pa', mine = id === 'predA' ? 'pa' : 'pb';
     if (S[other] === v) S[other] = S[mine]; // picking the same player swaps the sides
