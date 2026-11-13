@@ -702,6 +702,114 @@ td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:7em}
   table.compact.tilt .chip{padding:2px 6px;font-size:11px}
   table.compact td,table.compact th{padding:7px 4px}
 }
+
+/* ================= UX pass ================= */
+/* Standings: drop the least important columns first as the screen narrows, so the table never scrolls sideways */
+@media (max-width:1180px){ .c-trend{display:none} }
+@media (max-width:1020px){ .c-cpg,.c-tier{display:none} }
+@media (max-width:700px){ .c-streak{display:none} }
+@media (min-width:561px){ th,td{padding-left:10px;padding-right:10px} th.sortable button{padding:10px} table.compact th,table.compact td{padding-left:8px;padding-right:8px} }
+table.h2h .pl .nm{max-width:128px}
+.only-sm{display:none}
+
+/* Two-column pages go single-column before their tables get squeezed */
+@media (max-width:1100px){ .grid2{grid-template-columns:1fr} }
+
+/* Tablet widths: the top tabs and the sync pill have to share one row */
+@media (min-width:561px) and (max-width:720px){
+  nav.tabs a{padding-left:9px;padding-right:9px}
+  nav.tabs .syncpill .hide-sm{display:none}
+  .matrix th.rowh .nm{display:none}
+  .matrix th,.matrix td{padding:4px 3px}
+  .matrix td.cell a{padding:7px 3px}
+}
+
+/* Rivalry deck matchups: a list on phones, a table elsewhere */
+.mu-list{display:none;list-style:none;margin:0;padding:0}
+.mu-list li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid rgba(38,53,92,.6);font-size:14px}
+.mu-list li:last-child{border-bottom:0}
+.mu-d{min-width:0}
+.mu-r{flex:none;font-weight:700}
+
+/* Profile line: chips and plain items, no separators */
+.hero .meta{gap:6px 10px}
+.hero .meta .chip.track.on{font-variant-numeric:tabular-nums}
+
+/* Battle detail: elixir rows match the tower rows */
+.md-leak .tw{grid-template-columns:minmax(0,110px) 1fr 50px}
+
+@media (max-width:560px){
+  /* Header: league name and sync status on one row, edit buttons (when unlocked) below */
+  .top{gap:10px 12px;padding-bottom:10px}
+  .top .brand{flex:1 1 0}
+  .top > .syncpill{flex:none}
+  .top .brand .eyebrow{display:none}
+  .top .actions{flex-basis:100%}
+  .top .actions:not(:has(> :not([hidden]))){display:none}
+
+  /* Season bar: the picker already names the season, so don't print it twice */
+  .seasonbar{flex-wrap:nowrap;gap:10px}
+  .sb-pick{order:-1;flex:1 1 auto;min-width:0}
+  .sb-pick select{width:100%}
+  .sb-main{flex:0 1 auto;justify-content:flex-end;text-align:right}
+  .sb-main .eyebrow,.sb-main b{display:none}
+
+  /* Match rows: the rating change drops under the name so names get the full width */
+  .side{flex-wrap:wrap;gap:1px 6px}
+  .side a{flex:1 0 100%;order:0}
+  .side .crown,.side .dl{order:1}
+  .side.b a{text-align:right}
+
+  .mu-list{display:block}
+  .mu-table{display:none}
+
+  .only-sm{display:block}
+
+  /* Record book: two small cards per row instead of one tall card each */
+  .records{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .record{padding:10px 11px;gap:4px}
+  .record .rv{font-size:18px}
+  .record .rw a{gap:6px}
+  .record .rw b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .record .rw .av{width:22px;height:22px;font-size:11px;flex:none}
+  .record .rs{font-size:12px}
+
+  /* Profile header: avatar beside the name instead of on a row of its own */
+  .hero{gap:12px 14px;align-items:flex-start}
+  .hero .av.lg{width:52px;height:52px;font-size:22px}
+  .hero .who{flex:1 1 0}
+  .hero h2{font-size:28px}
+  .hero .big{flex-basis:100%}
+
+  /* Battle detail header: both sides start at the same height */
+  .md-board{align-items:start}
+  .md-score{align-self:center}
+}
+
+/* Touch screens: every button is at least ~40px to tap */
+@media (pointer:coarse), (max-width:560px){
+  .iconbtn{min-width:40px;min-height:40px}
+  .cnt button{min-width:40px;min-height:40px}
+  .swatches span{width:36px;height:36px}
+  details.how summary{padding:10px 0}
+  .rename{min-height:40px}
+}
+
+@media (max-width:560px){
+  .pl .tag{display:block;max-width:118px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+@media (max-width:420px){
+  .pl .nm,.pl .tag{max-width:104px}
+}
+@media (max-width:380px){
+  th,td{padding-left:5px;padding-right:5px}
+  .pl .nm,.pl .tag{max-width:92px}
+  table.compact .pl .nm{max-width:78px}
+  .rank{width:24px}
+}
+/* Dialog sections: the body grid already spaces blocks, so a heading sits close to what it labels */
+.dlg-b > h4.sub{margin:4px 0 -6px}
+@media (max-width:560px){ .md-rating > span{display:block} .md-side.a .md-rating > span{text-align:left} }
 </style>
 </head>
 <body>
@@ -715,8 +823,8 @@ td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:7em}
         <button class="rename" id="leagueBtn" type="button" data-act="rename-league" title="Rename league"><h1 id="leagueName">Friendly Battle League</h1></button>
       </div>
     </div>
+    <button class="syncpill mobile-only" type="button" data-act="sync" hidden><span class="dot"></span><span class="synctext">Auto-sync</span></button>
     <div class="actions">
-      <button class="syncpill mobile-only" type="button" data-act="sync" hidden><span class="dot"></span><span class="synctext">Auto-sync</span></button>
       <button class="btn edit-only" type="button" data-act="add-player"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>Add player</button>
       <button class="btn primary edit-only" type="button" data-act="log"><svg viewBox="0 0 24 20"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/></svg>Log a match</button>
     </div>
