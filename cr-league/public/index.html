@@ -810,6 +810,34 @@ table.h2h .pl .nm{max-width:128px}
 /* Dialog sections: the body grid already spaces blocks, so a heading sits close to what it labels */
 .dlg-b > h4.sub{margin:4px 0 -6px}
 @media (max-width:560px){ .md-rating > span{display:block} .md-side.a .md-rating > span{text-align:left} }
+
+/* ---------- phones: floating frosted tab bar (liquid-glass inspired, blue tinted) ---------- */
+@media (max-width:560px){
+  .bottombar{
+    left:max(12px, env(safe-area-inset-left)); right:max(12px, env(safe-area-inset-right));
+    bottom:max(10px, env(safe-area-inset-bottom));
+    padding:6px; gap:2px; border-radius:26px;
+    background:linear-gradient(180deg, rgba(58,92,170,.42), rgba(22,36,74,.58));
+    -webkit-backdrop-filter:blur(20px) saturate(170%); backdrop-filter:blur(20px) saturate(170%);
+    border:1px solid rgba(150,182,255,.22);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.14), inset 0 -1px 0 rgba(0,0,0,.18), 0 12px 32px rgba(3,7,18,.55), 0 2px 8px rgba(3,7,18,.35);
+  }
+  .bottombar a{border-radius:20px;padding:7px 0 6px;color:#a9b7dd;transition:background-color .2s,color .2s}
+  .bottombar a[aria-current="page"]{color:var(--gold);
+    background:linear-gradient(180deg, rgba(150,182,255,.22), rgba(150,182,255,.10));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+  .bottombar a:active{background:rgba(150,182,255,.14)}
+  /* Soft fade behind the bar, running past the screen edge, so nothing shows through under it */
+  #app::after{content:"";position:fixed;left:0;right:0;bottom:-80px;z-index:39;pointer-events:none;
+    height:calc(170px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg, rgba(11,18,34,0), rgba(11,18,34,.72) 45%, #0b1222 80%)}
+  #app{padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+  .toast{bottom:calc(96px + env(safe-area-inset-bottom))}
+}
+/* No blur support: keep it readable with a solid tinted fill */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  @media (max-width:560px){ .bottombar{background:linear-gradient(180deg,#22386c,#16244a)} }
+}
 </style>
 </head>
 <body>
