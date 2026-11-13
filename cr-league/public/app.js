@@ -963,17 +963,20 @@ function route() {
   return { v: 'standings' };
 }
 function renderSync() {
-  const pill = $('#syncPill'), txt = $('#syncText');
-  const s = S.sync;
-  if (S.demo || !s) { pill.hidden = true; return; }
-  pill.hidden = false;
-  pill.classList.remove('ok', 'err', 'busy');
-  if (!s.enabled) { txt.innerHTML = '<span class="hide-sm">Auto-sync </span>off'; pill.title = s.lastError || ''; return; }
-  if (s.running) { pill.classList.add('busy'); txt.textContent = 'Syncing…'; pill.title = ''; return; }
-  if (s.lastError) { pill.classList.add('err'); txt.innerHTML = `Sync issue<span class="hide-sm"> · ${esc(ago(s.lastRunAt))}</span>`; pill.title = s.lastError; return; }
-  pill.classList.add('ok');
-  txt.innerHTML = s.lastRunAt ? `<span class="hide-sm">Synced </span>${esc(ago(s.lastRunAt))}` : '<span class="hide-sm">Auto-sync </span>on';
-  pill.title = `Checks battle logs every ${s.intervalMinutes} min.${writable() ? ' Click to sync now.' : ''}`;
+  // Two pills: one in the top tabs (desktop) and one in the header (phones, where the tabs move to the bottom).
+  document.querySelectorAll('.syncpill').forEach(pill => {
+    const txt = pill.querySelector('.synctext');
+    const s = S.sync;
+    if (S.demo || !s) { pill.hidden = true; return; }
+    pill.hidden = false;
+    pill.classList.remove('ok', 'err', 'busy');
+    if (!s.enabled) { txt.innerHTML = '<span class="hide-sm">Auto-sync </span>off'; pill.title = s.lastError || ''; return; }
+    if (s.running) { pill.classList.add('busy'); txt.textContent = 'Syncing…'; pill.title = ''; return; }
+    if (s.lastError) { pill.classList.add('err'); txt.innerHTML = `Sync issue<span class="hide-sm"> · ${esc(ago(s.lastRunAt))}</span>`; pill.title = s.lastError; return; }
+    pill.classList.add('ok');
+    txt.innerHTML = s.lastRunAt ? `<span class="hide-sm">Synced </span>${esc(ago(s.lastRunAt))}` : '<span class="hide-sm">Auto-sync </span>on';
+    pill.title = `Checks battle logs every ${s.intervalMinutes} min.${writable() ? ' Click to sync now.' : ''}`;
+  });
 }
 function renderBanner() {
   const b = $('#banner');
@@ -1085,7 +1088,7 @@ function render() {
   renderBanner();
   renderSync();
   const r = route();
-  document.querySelectorAll('nav.tabs a').forEach(a => {
+  document.querySelectorAll('nav.tabs a, nav.bottombar a').forEach(a => {
     if (a.dataset.tab === r.v || (r.v === 'player' && a.dataset.tab === 'standings')) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
