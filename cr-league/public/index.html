@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 20%27%3E%3Cpath fill=%27%23ffc63a%27 d=%27M2 6l5 4 5-8 5 8 5-4-2 11H4z%27/%3E%3Crect fill=%27%23ffc63a%27 x=%274%27 y=%2717%27 width=%2716%27 height=%272.5%27 rx=%271%27/%3E%3C/svg%3E">
 <title>Friendly Battle League</title>
 <!--SOCIAL-->
@@ -663,7 +663,7 @@ select option{background:var(--panel);color:var(--ink)}
   .bottombar svg{width:23px;height:23px;fill:currentColor}
   .bottombar a[aria-current="page"]{color:var(--gold);background:rgba(255,198,58,.09)}
   .bottombar a:active{background:rgba(255,255,255,.05)}
-  body{padding-bottom:calc(74px + env(safe-area-inset-bottom))}
+  #app{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
   .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
 }
 
@@ -677,6 +677,18 @@ select option{background:var(--panel);color:var(--ink)}
 /* ---------- new-season welcome ---------- */
 .newseason{color:var(--gold)}
 .intro-sub .medal{width:20px;height:20px;vertical-align:-4px;margin-right:6px}
+
+/* ---------- safe areas (notch, home indicator) now that the page draws edge to edge ---------- */
+.wrap{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(20px, env(safe-area-inset-right))}
+.intro-inner{padding-left:max(20px, env(safe-area-inset-left));padding-right:max(20px, env(safe-area-inset-right));padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+@media (max-width:560px){
+  .wrap{padding-left:max(14px, env(safe-area-inset-left));padding-right:max(14px, env(safe-area-inset-right))}
+  /* Solid bar with a soft edge, so content clearly slides under it instead of looking cut off. */
+  .bottombar{background:#0d1426;-webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:0 -10px 24px rgba(4,8,18,.55);
+    padding:6px max(6px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left))}
+  .intro .ticker{padding-top:calc(12px + env(safe-area-inset-top))}
+  .top{padding-top:calc(16px + env(safe-area-inset-top))}
+}
 </style>
 </head>
 <body>
