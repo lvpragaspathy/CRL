@@ -583,7 +583,7 @@ function matchDetail(id) {
   const foot = `<a class="btn" href="${pairHash(A.id, B.id)}" data-act="close-nav">Rivalry: ${esc(A.name)} vs ${esc(B.name)}</a>
     ${writable() ? `<button class="btn" type="button" data-act="edit-match" data-id="${esc(m.id)}">Edit</button><button class="btn danger" type="button" data-act="del-match" data-id="${esc(m.id)}">Delete</button>` : ''}
     <button class="btn primary" type="button" data-act="close">Done</button>`;
-  openDlg('Battle details', body, foot, form => { form.closest('dialog').classList.add('wide'); form.querySelector('[data-act=close]').focus(); });
+  openDlg('Battle details', body, foot, form => { form.closest('dialog').classList.add('wide'); });
 }
 
 function cardsSection(id, data, view) {
