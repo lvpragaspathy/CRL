@@ -1173,7 +1173,8 @@ function render() {
 }
 PHONE_MQ.addEventListener('change', () => { if (!dlg.open) render(); });
 /* ---------- page transitions ---------- */
-const TAB_ORDER = ['standings', 'matches', 'rivalries', 'stats', 'lab'];
+// Pages slide in the direction the tabs sit: the phone bar puts Standings in the middle, the desktop tabs start with it.
+const tabOrder = () => [...document.querySelectorAll(narrow() ? 'nav.bottombar a' : 'nav.tabs a')].map(a => a.dataset.tab);
 const tabOf = r => (r.v === 'player' ? 'standings' : r.v);
 let navPrev = route();
 function animateView(dir) {
@@ -1187,7 +1188,7 @@ window.addEventListener('hashchange', () => {
   const from = navPrev, to = route(); navPrev = to;
   render(); window.scrollTo(0, 0);
   if (from.v === 'welcome' || to.v === 'welcome') return;
-  const a = TAB_ORDER.indexOf(tabOf(from)), b = TAB_ORDER.indexOf(tabOf(to));
+  const order = tabOrder(), a = order.indexOf(tabOf(from)), b = order.indexOf(tabOf(to));
   animateView(b > a ? 'fwd' : b < a ? 'back' : 'fade');
 });
 
