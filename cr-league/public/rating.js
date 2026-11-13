@@ -299,6 +299,18 @@ export const RANKS = NAMES.map(([name, cls], i) => ({ name, cls, min: CHAMPION_R
 const ROMAN = ['', 'I', 'II', 'III'];
 /** A player is placed once the system is reasonably sure of their rating. Until then RP is hidden. */
 export const isPlaced = s => s.games > 0 && s.rd <= PROVISIONAL_RD;
+/**
+ * Battles left before a player is placed. Replays their uncertainty forward against a typical settled opponent
+ * (same skill, RD 80) with alternating results, since RD shrinks at about the same pace whether you win or lose.
+ */
+export function battlesToPlace(s, oppRd = 80) {
+  if (isPlaced(s)) return 0;
+  let p = { r: s.r, rd: s.rd, sigma: START_SIGMA }, n = 0;
+  while (p.rd > PROVISIONAL_RD && n < 40) { p = glicko2Update(p, [{ r: p.r, rd: oppRd, s: n % 2 }], TAU, 1); n++; }
+  return n;
+}
+/** The RP an unplaced player would show if they placed at their current skill estimate. */
+export const projectedRp = s => s.r - 2 * PROVISIONAL_RD;
 export const UNPLACED = Object.freeze({ name: 'Unplaced', div: 0, label: 'Unplaced', cls: 't-place', placed: false, ord: -1, next: null });
 /** Rank for an RP value: { name, div (3 lowest .. 1 highest, 0 for Champion), label, cls, ord (sortable), next (RP to the next division) } */
 export function rankOf(rp) {

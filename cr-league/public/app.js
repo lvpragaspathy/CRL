@@ -1,5 +1,5 @@
 import {
-  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
+  START_R, MIN_CHAMP_GAMES, PROVISIONAL_RD, RANKS, DIVISION_RP, battlesToPlace, projectedRp, computeLeague, rank, rankOf, isPlaced, ranking, pct, winProb, seasonLabel, seasonKey, cardStats, avgElixir, backtest,
 } from './rating.js';
 import {
   hpInfo, clutch, leaks, tilt, heatmap, meta, race, records, weekly, scorePreds, calibration, eloPreds, tune, GRID, archetype,
@@ -7,7 +7,9 @@ import {
 } from './stats.js';
 
 /* ---------- constants ---------- */
-const PLACEMENT_HINT = '8';   // battles to get placed the first time (about 3 after each season reset)
+// Battles to get placed the first time and after a season reset, straight from the rating model.
+const PLACEMENT_HINT = String(battlesToPlace({ games: 0, r: 1500, rd: 350 }));
+const REPLACE_HINT = String(battlesToPlace({ games: 0, r: 1500, rd: 150 }));
 const MODES = ['Classic', 'Triple Elixir', 'Draft', 'Sudden Death', 'Mega Deck', 'Other'];
 const COLORS = ['#4a90ff', '#ff5367', '#ffc63a', '#3fd68f', '#b783ff', '#ff8a3d', '#2fd3e0', '#ff74be'];
 const CROWN = '<svg class="crown" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/><rect x="4" y="17" width="16" height="2.5" rx="1"/></svg>';
@@ -419,16 +421,19 @@ ${tbl}    </div>` : `<div class="panel-b muted" style="padding-top:8px">Nobody i
   return seasonBar(L) + (narrow() ? table + strip : strip + table) + champs;
 }
 // Players the system isn't sure about yet: no RP, no rank, just how far along their placements are.
-function placingProgress(s) {
-  const rd0 = s.rdHist[0] ?? 350, span = rd0 - PROVISIONAL_RD;
-  return span > 0 ? Math.max(0, Math.min(1, (rd0 - s.rd) / span)) : 1;
+// Placement status: battles still needed, and from a few games in, the rank they're projected to place at.
+const TEASE_AFTER = 3;   // battles before an unplaced player gets a projected rank
+function placing(s) {
+  const left = battlesToPlace(s);
+  return { left, toward: s.games >= TEASE_AFTER ? rankOf(projectedRp(s)) : null };
 }
+const leftTxt = n => `~${n} more battle${n === 1 ? '' : 's'}`;
 function unplacedHtml(list, view) {
   return `<div class="unplaced">
-    <div class="unplaced-h"><span>Unplaced</span><span class="muted">RP and rank show after placements: about ${PLACEMENT_HINT} battles at first, 3 each new season</span></div>
-    ${list.map(p => { const s = view.st[p.id], pr = placingProgress(s); return `<a class="unplaced-row" href="#p-${esc(p.id)}">
-      ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}</span></span>
-      <span class="un-prog" title="Placement progress"><i style="width:${Math.round(pr * 100)}%"></i></span><span class="un-pct num">${s.games ? Math.round(pr * 100) + '%' : ''}</span>
+    <div class="unplaced-h"><span>Unplaced</span><span class="muted">RP and rank show after placements: about ${PLACEMENT_HINT} battles at first, ${REPLACE_HINT} each new season</span></div>
+    ${list.map(p => { const s = view.st[p.id], pl = placing(s); return `<a class="unplaced-row" href="#p-${esc(p.id)}">
+      ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}${pl.toward ? ` · <span class="proj">projected <span class="chip ${pl.toward.cls} sm">${pl.toward.name}</span></span>` : ''}</span></span>
+      <span class="un-left">${leftTxt(pl.left)}</span>
     </a>`; }).join('')}
   </div>`;
 }
@@ -712,7 +717,8 @@ function viewPlayer(id, data, L, view) {
   if (!p) return `<section class="panel"><div class="panel-b"><p style="margin:0">That player isn't in this league. <a href="#standings">Back to standings</a></p></div></section>`;
   const s = view.st[id], k = rank(s), placed = isPlaced(s);
   const order = ranking(data, view).filter(x => isPlaced(view.st[x.id])); const pos = order.findIndex(x => x.id === id);
-  const rankTxt = p.archived ? 'Retired' : placed ? `#${pos + 1} of ${order.length}` : s.games ? `Placing · ${s.games} of ~${PLACEMENT_HINT} battles` : 'No battles this season';
+  const pl = placed ? null : placing(s);
+  const rankTxt = p.archived ? 'Retired' : placed ? `#${pos + 1} of ${order.length}` : `Placing · ${leftTxt(pl.left)}${pl.toward ? `, projected ${pl.toward.name}` : ''}`;
   const mine = view.ms.filter(m => m.a === id || m.b === id);
   let best = null;
   for (const m of mine) {
@@ -1067,7 +1073,7 @@ function viewAbout(data) {
     ['My friendly didn\'t show up. Why?', `Both players need their player tag saved in the league, and it has to be a 1v1 friendly or clan-mate battle. The server checks battle logs every ${syncMin()} minutes, so give it a few. The game only keeps your last 25 battles, so if <i>both</i> of you played 25+ other games before the next check, it's gone. An editor can always log it by hand.`],
     ['Do ladder, 2v2, or tournament games count?', 'No. Only 1v1 friendly battles between two league members count. Your ladder trophies have nothing to do with your RP here.'],
     ['What\'s the difference between RP and my skill range?', 'Your <b>skill range</b> is where the system thinks your true skill sits; it narrows as you play. <b>RP</b> is the bottom of that range: the skill the system is about 95% sure you have. Standings and ranks use RP, so a hot start on few games can\'t top the table until it holds up. The skill range only shows on your profile.'],
-    ['Why am I unplaced?', `The system isn't sure enough about you yet, so your RP and rank are hidden. It takes about ${PLACEMENT_HINT} battles the first time, and about 3 at the start of each season. Unplaced players sit below the standings until they're done.`],
+    ['Why am I unplaced?', `The system isn't sure enough about you yet, so your RP and rank are hidden. It takes about ${PLACEMENT_HINT} battles the first time, and about ${REPLACE_HINT} at the start of each season. Unplaced players sit below the standings until they're done.`],
     ['Why is someone with a worse record ranked above me?', 'Ranks go by RP, not by wins. Beating stronger players is worth more than beating weaker ones, winning by more crowns is worth more, and the system has to be sure about you. Two players with the same record can sit in different divisions.'],
     ['My RP dropped and I didn\'t even play.', 'That\'s your skill range widening while you\'re inactive. The longer you\'re away, the less sure the system is about you, so RP (the bottom of the range) slowly drifts down. Playing again brings it back.'],
     ['What happens when crowns are tied?', 'The app reads both sides\' remaining tower HP from the battle log and applies the in-game tiebreaker rule. If that info isn\'t there, it counts as a draw.'],
@@ -1106,7 +1112,7 @@ function viewAbout(data) {
     <li><b>Ranked Points (RP)</b> are the bottom of your skill range (skill − 2×RD): the skill the system is about 95% sure you have. Standings, ranks and champions all use RP. A lucky first game can't top the table, but a real hot streak against strong players still climbs fast.</li>
     <li>Beating someone with higher skill earns more. Results move uncertain players (new, or coming back) further than settled ones. Draws split the points; tiebreaker wins count as wins.</li>
     <li><b>Crowns matter.</b> Against an even opponent, a 2-crown win moves skill 1.15× as much as a 1-crown win, and a 3-crown win 1.3×. The bonus grows when the underdog wins and shrinks when a big favorite stomps a weaker player. The loser drops by the same multiple.</li>
-    <li><b>Placements.</b> Until the system is sure enough about you (RD ${PROVISIONAL_RD} or less) you're <b>unplaced</b>: no RP, no rank, listed below the standings. That's about ${PLACEMENT_HINT} battles the first time and about 3 at the start of each season.</li>
+    <li><b>Placements.</b> Until the system is sure enough about you (RD ${PROVISIONAL_RD} or less) you're <b>unplaced</b>: no RP, no rank, listed below the standings. That's about ${PLACEMENT_HINT} battles the first time and about ${REPLACE_HINT} at the start of each season.</li>
     <li>Win chances come from both players' skill ranges, so two wide ranges pull the odds toward 50/50. An <b>Upset</b> is a win the system gave under 35%.</li>
     <li>Nothing is stored as a rating. Everything is recalculated from the full match history, so fixing an old match fixes everything after it.</li>
   </ul></div></section>

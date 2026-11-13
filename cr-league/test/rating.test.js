@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, isPlaced, rankOf, RANKS, cardStats,
+  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, isPlaced, rankOf, RANKS, battlesToPlace, projectedRp, PROVISIONAL_RD, cardStats,
   START_R, SEASON_CARRY, SEASON_RD_FLOOR, MIN_CHAMP_GAMES,
 } from '../public/rating.js';
 
@@ -188,4 +188,11 @@ test('every rated match records RP before and after for both sides, and peak RP 
   near(d2.rp.b0, d1.rp.a1, 1e-9, "x's RP after game 1 is the before of game 2");
   assert.equal(d1.rp.placedA, false, 'one game is not enough to place');
   assert.ok(v.st.x.peakScore >= v.st.x.scoreHist[1] && v.st.x.peakScore >= v.st.x.score, 'peak is the max RP seen');
+});
+
+test('placement countdown: about 8 battles from scratch, about 3 after a season reset, 0 once placed', () => {
+  assert.ok(Math.abs(battlesToPlace({ games: 0, r: 1500, rd: 350 }) - 8) <= 1, 'fresh player');
+  assert.ok(Math.abs(battlesToPlace({ games: 0, r: 1600, rd: 150 }) - 3) <= 1, 'season reset');
+  assert.equal(battlesToPlace({ games: 20, r: 1500, rd: 90 }), 0);
+  assert.equal(projectedRp({ r: 1800 }), 1800 - 2 * PROVISIONAL_RD);
 });
