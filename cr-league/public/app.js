@@ -983,6 +983,82 @@ function viewLab(data, L) {
 }
 const labSig = data => `${Object.keys(data.matches).length}|${Object.keys(data.players).length}|${S.demo ? 'demo' : 'live'}`;
 
+/* ---------- about + first-visit how-to ---------- */
+const syncMin = () => S.sync?.intervalMinutes ?? 10;
+function viewAbout(data) {
+  const name = esc(data.league.name || 'Friendly Battle League');
+  const faq = [
+    ['My friendly didn\'t show up. Why?', `Both players need their player tag saved in the league, and it has to be a 1v1 friendly or clan-mate battle. The server checks battle logs every ${syncMin()} minutes, so give it a few. The game only keeps your last 25 battles, so if <i>both</i> of you played 25+ other games before the next check, it's gone. An editor can always log it by hand.`],
+    ['Do ladder, 2v2, or tournament games count?', 'No. Only 1v1 friendly battles between two league members count. Your ladder trophies have nothing to do with your rating here.'],
+    ['Why is someone with a lower rating ranked above me?', 'Rankings use your <b>score</b> (rating − 2×RD), not raw rating. If you\'ve played fewer games, the system is less sure about you, so your score sits lower until it has more data.'],
+    ['Why does it say "Placement" next to my name?', `Your RD (uncertainty) is still above 110, so the system doesn't trust your rating yet. Play a few more battles. Everyone goes through a short placement stretch at the start of each season too.`],
+    ['My score dropped and I didn\'t even play.', 'That\'s RD growing while you\'re inactive. The longer you\'re away, the less sure the system is about you, so your score slowly drifts down. Playing again brings it back.'],
+    ['What happens when crowns are tied?', 'The app reads both sides\' remaining tower HP from the battle log and applies the in-game tiebreaker rule. If that info isn\'t there, it counts as a draw.'],
+    ['A match is wrong. Can it be fixed?', 'Yes. Anyone with the league password can edit or delete any match. Ratings are recalculated from the full history every time, so fixing an old match fixes everything after it. Deleted imports stay deleted and won\'t sneak back in on the next sync.'],
+    ['How do I edit stuff?', 'Tap <b>Unlock editing</b> at the bottom of the page and enter the league password. Anyone can view the league without it.'],
+    ['Can I put this on my home screen?', 'Yes. On iPhone, open it in Safari, tap Share, then <b>Add to Home Screen</b>. On Android or desktop Chrome, use <b>Install app</b> from the browser menu. It opens full-screen like a regular app.'],
+    ['Is the rating system actually any good?', 'Check the <a href="#lab">Lab</a>. It replays every rated battle and scores the win predictions against what actually happened, and compares them to plain Elo.'],
+  ];
+  return `<section class="panel about-hero"><div class="panel-b">
+      <div class="eyebrow">About</div>
+      <h2 class="lab-h">What is ${name}?</h2>
+      <p class="muted">A ranked league for Clash Royale friendly battles. Friendlies don't count for anything in the game, so this tracks them: every 1v1 friendly between league members gets pulled in automatically, rated, and added to a monthly season with a champion at the end.</p>
+    </div></section>
+  <div class="grid2 about-grid">
+    <section class="panel"><div class="panel-h"><h2>How battles get in</h2></div><div class="panel-b"><ul class="about-list">
+      <li>Every player in the league has their <b>player tag</b> saved. Every ${syncMin()} minutes the server reads each player's battle log from the official Clash Royale API.</li>
+      <li>Any 1v1 friendly between two league members is added, with crowns, decks, tower HP and the exact time.</li>
+      <li>The same battle shows up in both players' logs but only gets counted once.</li>
+      <li>Editors can also log matches by hand. If a hand-logged match lines up with an imported one, they're merged instead of doubled.</li>
+    </ul></div></section>
+    <section class="panel"><div class="panel-h"><h2>Seasons</h2></div><div class="panel-b"><ul class="about-list">
+      <li>Seasons run by calendar month.</li>
+      <li>On the 1st, every rating moves halfway back to ${START_R} and uncertainty goes up a bit, so the first few games of a new season are placements.</li>
+      <li>The highest score at the end of the month, with at least ${MIN_CHAMP_GAMES} battles played, is crowned <b>season champion</b>.</li>
+      <li>Use the season picker at the top of most pages to look back at older months or all time.</li>
+    </ul></div></section>
+  </div>
+  <section class="panel"><div class="panel-h"><h2>How ratings work</h2></div><div class="panel-b"><ul class="about-list">
+    <li>Ratings use <b>Glicko-2</b>, an upgraded version of Elo. Everyone starts at <b>${START_R}</b> with a rating deviation (RD) of 350. RD is the ± next to a rating: how sure the system is about you. It shrinks as you play and grows while you're away.</li>
+    <li>Beating someone rated higher earns more. Results move uncertain ratings (new players, people coming back) faster than settled ones. Draws split the points; tiebreaker wins count as wins.</li>
+    <li><b>Crowns matter.</b> Against an even opponent, a 2-crown win moves ratings 1.15× as much as a 1-crown win, and a 3-crown win 1.3×. The bonus grows when the underdog wins and shrinks when a big favorite stomps a weaker player. The loser drops by the same multiple.</li>
+    <li><b>Rankings use your score</b>, which is rating − 2×RD: the rating the system is about 95% sure you're at least at. A lucky first game can't top the table, but a real hot streak against strong players still climbs fast.</li>
+    <li>Tiers go by score: Bronze under 1300, Silver 1300+, Gold 1400+, Diamond 1500+, Champion 1600+. "Placement" shows while RD is above 110.</li>
+    <li>Win chances come from both players' ratings and RDs, so two uncertain ratings pull the odds toward 50/50. An <b>Upset</b> is a win the system gave under 35%.</li>
+    <li>Nothing is stored as a rating. Everything is recalculated from the full match history, so fixing an old match fixes everything after it.</li>
+  </ul></div></section>
+  <section class="panel"><div class="panel-h"><h2>What's on each page</h2></div><div class="panel-b"><dl class="about-pages">
+    <div><dt><a href="#standings">Standings</a></dt><dd>The table: score, rating, record, streak and recent form. Tap a player for their profile, rating history, decks and head-to-heads.</dd></div>
+    <div><dt><a href="#matches">Matches</a></dt><dd>Every battle, newest first. Tap one for decks, tower HP and how much each player's rating moved.</dd></div>
+    <div><dt><a href="#rivalries">Rivalries</a></dt><dd>Pick any two players for their head-to-head record, win chance and how their decks match up.</dd></div>
+    <div><dt><a href="#stats">Stats</a></dt><dd>The rating race, record book, clutch and tilt stats, the league meta, when people play, and a shareable weekly recap.</dd></div>
+    <div><dt><a href="#lab">Lab</a></dt><dd>Nerd corner: how well the rating system predicts results, and a tuner that tests other settings.</dd></div>
+  </dl></div></section>
+  <section class="panel"><div class="panel-h"><h2>FAQ</h2></div><div class="panel-b faq">
+    ${faq.map(([q, a]) => `<details><summary>${q}</summary><p>${a}</p></details>`).join('')}
+  </div></section>`;
+}
+
+const HOWTO_KEY = 'crl-howto';
+const seenHowTo = () => { try { return localStorage.getItem(HOWTO_KEY) === '1'; } catch { return true; } };   // storage blocked: don't nag every load
+let howToTimer = 0;
+// First time someone gets into the league (after the welcome screen, or from a shared link), a short how-it-works sheet.
+function maybeHowTo(r) {
+  if (howToTimer || seenHowTo() || r.v === 'about' || !(S.loaded || S.demo)) return;
+  howToTimer = setTimeout(() => {
+    howToTimer = 0;
+    if (dlg.open || seenHowTo() || route().v === 'about' || route().v === 'welcome') return;
+    try { localStorage.setItem(HOWTO_KEY, '1'); } catch { /* storage blocked */ }
+    openDlg('How this works', `<ul class="howto">
+        <li><span class="hi" aria-hidden="true">1</span><span><b>Play friendlies.</b> Any 1v1 friendly between league members gets picked up from the battle log within ~${syncMin()} minutes. No need to log anything.</span></li>
+        <li><span class="hi" aria-hidden="true">2</span><span><b>Ratings, not just wins.</b> Beating stronger players and winning by more crowns moves you further. The table ranks by <b>score</b>, which also factors in how sure the system is about you.</span></li>
+        <li><span class="hi" aria-hidden="true">3</span><span><b>Monthly seasons.</b> Ratings partly reset on the 1st, and the top score with ${MIN_CHAMP_GAMES}+ battles at month's end is champion.</span></li>
+        <li><span class="hi" aria-hidden="true">4</span><span>Tap any player, match or rivalry to dig in.</span></li>
+      </ul>`,
+      `<a class="btn" href="#about" data-act="close-nav">Full guide &amp; FAQ</a><button class="btn primary" type="button" data-act="close">Got it</button>`);
+  }, 450);
+}
+
 /* ---------- routing + render ---------- */
 const SEEN_KEY = 'crl-entered';
 const seenIntro = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
@@ -1004,7 +1080,7 @@ function route() {
     if (seen && seen !== nowSeason()) return { v: 'welcome', reason: 'season' };
   }
   if (h.startsWith('p-')) return { v: 'player', id: h.slice(2) };
-  if (['matches', 'rivalries', 'stats', 'lab'].includes(h)) return { v: h };
+  if (['matches', 'rivalries', 'stats', 'lab', 'about'].includes(h)) return { v: h };
   if (h.startsWith('r-')) return { v: 'rivalries', pair: h.slice(2) };
   return { v: 'standings' };
 }
@@ -1086,7 +1162,7 @@ function introHtml(data, L, reason) {
           ? `${MEDAL}<b>${esc(champP.name)}</b> is the ${esc(seasonLabel(prevKey))} champion, finishing with a score of <b>${R(champ.score ?? champ.r)}</b>. A new season starts now: every rating moved halfway back to 1500, so the first few battles are placements.`
           : `${esc(seasonLabel(prevKey))} is over. Nobody played the ${MIN_CHAMP_GAMES} battles needed to be crowned, so the title is up for grabs. Every rating moved halfway back to 1500 for the new season.`}</p>`
         : `<p class="intro-sub">${L.all.ms.length ? `<b>${players}</b> players, <b>${L.all.ms.length}</b> battles and one crown per month.${lastChamp ? ` Last season's champ: <b>${esc(lastChamp.name)}</b>.` : ' Every friendly counts, and the battle log keeps score.'}` : 'Every friendly counts. Battles between league members are tracked automatically and settled by rating.'}</p>`}
-        <div class="intro-actions"><button class="btn primary big" type="button" data-act="enter">Enter the league <span class="arr" aria-hidden="true">→</span></button></div>
+        <div class="intro-actions"><button class="btn primary big" type="button" data-act="enter">Enter the league <span class="arr" aria-hidden="true">→</span></button><a class="intro-about" href="#about" data-act="enter-to" data-href="#about">How it works</a></div>
         <div class="intro-facts">
           <div><span class="v">${esc(daysLeft(L).replace(' left', ''))}</span><span class="k">Left this season</span></div>
           <div><span class="v">${hot ? esc(hot.name) : '—'}</span><span class="k">${hot ? `On a W${cur.st[hot.id].streakN} streak` : 'Hottest streak'}</span></div>
@@ -1168,10 +1244,11 @@ function render() {
   const view = pickView(L);
   // Keep focus on the season picker across re-renders so keyboard users don't lose their place.
   const focusId = document.activeElement?.id;
-  const views = { matches: viewMatches, rivalries: viewRivalries, stats: viewStats, lab: viewLab };
+  const views = { matches: viewMatches, rivalries: viewRivalries, stats: viewStats, lab: viewLab, about: viewAbout };
   $('#view').innerHTML = r.v === 'player' ? viewPlayer(r.id, data, L, view) : (views[r.v] || viewStandings)(data, L, view);
   if (r.v === 'stats') drawRecap(data, L);
   if (focusId && ['seasonSel', 'filterSel', 'predA', 'predB'].includes(focusId)) document.getElementById(focusId)?.focus();
+  maybeHowTo(r);
 }
 PHONE_MQ.addEventListener('change', () => { if (!dlg.open) render(); });
 /* ---------- page transitions ---------- */
@@ -1191,7 +1268,7 @@ window.addEventListener('hashchange', () => {
   render(); window.scrollTo(0, 0);
   if (from.v === 'welcome' || to.v === 'welcome') return;
   const order = tabOrder(), a = order.indexOf(tabOf(from)), b = order.indexOf(tabOf(to));
-  animateView(b > a ? 'fwd' : b < a ? 'back' : 'fade');
+  animateView(a < 0 || b < 0 ? 'fade' : b > a ? 'fwd' : b < a ? 'back' : 'fade');   // About isn't a tab: fade
 });
 
 /* ---------- phone tab bar: a glass indicator that slides to the tab you tap, or follows your finger ---------- */
@@ -1205,7 +1282,12 @@ function placeInd(el, animate = true) {
   bar.classList.add('has-ind');
   if (first || !animate) { void ind.offsetWidth; bar.classList.remove('no-anim'); }
 }
-function syncInd(animate = true) { if (!barDrag) placeInd(bar.querySelector('a[aria-current="page"]'), animate); }
+function syncInd(animate = true) {
+  if (barDrag) return;
+  const cur = bar.querySelector('a[aria-current="page"]');
+  if (!cur) { bar.classList.remove('has-ind'); return; }   // a page that isn't a tab (About): no lens
+  placeInd(cur, animate);
+}
 const tabAt = x => barTabs.reduce((best, t) => { const r = t.getBoundingClientRect(), d = Math.abs(x - (r.left + r.width / 2)); return !best || d < best.d ? { t, d } : best; }, null)?.t;
 const setHot = t => barTabs.forEach(x => x.classList.toggle('hot', x === t));
 function barEnd(go) {
