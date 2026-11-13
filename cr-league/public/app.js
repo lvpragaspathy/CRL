@@ -420,7 +420,7 @@ function sinceHtml(data, L) {
 }
 // Nobody picked yet: one line under the table asking who they are.
 function whoAreYouHtml(data) {
-  if (getMe()) return '';
+  if (getMe() || S.demo) return '';
   const ps = Object.values(data.players).filter(p => !p.archived).sort((a, b) => a.name.localeCompare(b.name));
   if (!ps.length) return '';
   return `<div class="whoami"><label for="meSel">Which one are you?</label><select id="meSel" data-act="me-pick"><option value="">Pick yourself…</option>${ps.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}<option value="-">Just watching</option></select><span class="muted">Highlights your row and shows what changed since your last visit.</span></div>`;
@@ -831,7 +831,7 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${k.cls}">${k.label}</span>${p.archived ? '' : meId() === id ? '<span class="chip youchip">You</span><button class="linkbtn" type="button" data-act="me-clear">Not me</button>' : `<button class="btn small mebtn" type="button" data-act="me-set" data-id="${esc(id)}">This is me</button>`}<span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
+        <div class="meta"><span class="chip ${k.cls}">${k.label}</span>${p.archived || S.demo ? '' : meId() === id ? '<span class="chip youchip">You</span><button class="linkbtn" type="button" data-act="me-clear">Not me</button>' : `<button class="btn small mebtn" type="button" data-act="me-set" data-id="${esc(id)}">This is me</button>`}<span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
       <div class="big"><div class="k" title="${RP_HELP}">Ranked Points</div><div class="rating num${placed ? '' : ' muted'}">${placed ? R(s.score) : '—'}</div>
@@ -1549,7 +1549,7 @@ function playerDialog(id) {
   openDlg(p ? 'Edit player' : 'Add a player', `
     <label class="f" for="pName">Name<input id="pName" type="text" maxlength="32" required value="${esc(p ? p.name : '')}" placeholder="What the group calls them"></label>
     <div class="row2">
-      <label class="f" for="pTag">Player tag (needed for auto-tracking)<input id="pTag" type="text" maxlength="15" value="${esc(p ? p.tag : '')}" placeholder="#2PYQ8LV0"></label>
+      <label class="f" for="pTag">Player tag (needed for auto-tracking)<input id="pTag" type="text" maxlength="15" value="${esc(p ? p.tag : '')}" placeholder="#2LQGJYC8"></label>
       <div class="f" style="display:grid;gap:6px;font-size:13px;font-weight:650;color:var(--muted)">Color
         <div class="swatches" role="radiogroup" aria-label="Profile color">${COLORS.map((c, i) => `<label><input type="radio" name="pColor" id="pColor${i}" value="${c}"${c === color ? ' checked' : ''} aria-label="Color ${i + 1}"><span style="background:${c}"></span></label>`).join('')}</div>
       </div>
@@ -1565,7 +1565,7 @@ function playerDialog(id) {
         let tag = form.querySelector('#pTag').value.trim().toUpperCase().replace(/\s+/g, '').replace(/O/g, '0');
         const err = form.querySelector('#pErr');
         if (!name) { err.textContent = 'Give the player a name.'; return; }
-        if (tag) { if (!tag.startsWith('#')) tag = '#' + tag; if (!/^#[0289CGJLPQRUVY]{3,14}$/.test(tag)) { err.textContent = 'Player tags use only 0 2 8 9 C G J L P Q R U V Y, like #2PYQ8LV0. Copy it from your in-game profile.'; return; } }
+        if (tag) { if (!tag.startsWith('#')) tag = '#' + tag; if (!/^#[0289CGJLPQRUVY]{3,14}$/.test(tag)) { err.textContent = 'Player tags use only 0 2 8 9 C G J L P Q R U V Y, like #2LQGJYC8. Copy it from your in-game profile.'; return; } }
         const np = { id: id || undefined, name, tag, deck: form.querySelector('#pDeck').value.trim().slice(0, 160), color: (form.querySelector('input[name=pColor]:checked') || {}).value || color, archived: p ? p.archived : false };
         busy(form, true);
         if (await ops.putPlayer(np, !p)) { closeDlg(); toast(p ? 'Profile updated.' : `${name} joined the league.`); }
@@ -1735,7 +1735,7 @@ function makeDemo() {
     king: lost >= 3 ? null : Math.round(4824 - (rnd() < 0.35 ? rnd() * 2400 : 0)),
     princess: Array.from({ length: Math.max(0, 2 - Math.min(lost, 2)) }, () => Math.round(3052 * (0.1 + 0.9 * rnd()))),
   });
-  const names = [['Ava', '#Q8RL2YJ', 'Hog 2.6 Cycle'], ['Ben', '#2PYQ8LV0', 'Golem Beatdown'], ['Chloe', '#9VUG0P', 'X-Bow 3.0'], ['Dev', '', 'Log Bait'], ['Eli', '#LJC22Q', 'Royal Giant Fisherman'], ['Fern', '#8CUY02', 'Lava Loon']];
+  const names = [['Ava', '#Q8RL2YJ', 'Hog 2.6 Cycle'], ['Ben', '#2LQGJYC8', 'Golem Beatdown'], ['Chloe', '#9VUG0P', 'X-Bow 3.0'], ['Dev', '', 'Log Bait'], ['Eli', '#LJC22Q', 'Royal Giant Fisherman'], ['Fern', '#8CUY02', 'Lava Loon']];
   const skill = [1680, 1610, 1550, 1500, 1460, 1400];
   const now = Date.now(), dayMs = 864e5, span = 75;
   const players = {}, ids = [];

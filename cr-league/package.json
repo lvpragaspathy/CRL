@@ -1,7 +1,7 @@
 {
   "name": "cr-friends-league",
   "version": "1.0.0",
-  "description": "Clash Royale friendly-battle league with Elo ratings and automatic match tracking",
+  "description": "Ranked Clash Royale friendly-battle league: Glicko-2 skill, Ranked Points and ranks, monthly seasons, automatic match tracking",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
