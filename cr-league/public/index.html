@@ -663,6 +663,13 @@ select option{background:var(--panel);color:var(--ink)}
   body{padding-bottom:calc(74px + env(safe-area-inset-bottom))}
   .toast{bottom:calc(86px + env(safe-area-inset-bottom))}
 }
+
+/* ---------- phones: intro ticker sits at the top ---------- */
+@media (max-width:560px){
+  .intro{grid-template-rows:auto 1fr}
+  .intro .ticker{order:-1;border-top:0;border-bottom:1px solid var(--line)}
+  .intro-inner{padding-top:28px}
+}
 </style>
 </head>
 <body>
