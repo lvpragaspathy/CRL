@@ -407,19 +407,19 @@ function viewStandings(data, L, view) {
   return seasonBar(L) + (narrow() ? table + strip : strip + table) + champs;
 }
 // Players the system isn't sure about yet: no RP, no rank, just how far along their placements are.
-// Placement progress as battles played vs battles still needed, so the bar moves at the pace people actually play.
-const TEASE_AFTER = 3;   // battles before an unplaced player gets a "tracking toward" rank hint
+// Placement status: battles still needed, and from a few games in, the rank they're projected to place at.
+const TEASE_AFTER = 3;   // battles before an unplaced player gets a projected rank
 function placing(s) {
   const left = battlesToPlace(s);
-  return { left, pr: s.games ? s.games / (s.games + left) : 0, toward: s.games >= TEASE_AFTER ? rankOf(projectedRp(s)) : null };
+  return { left, toward: s.games >= TEASE_AFTER ? rankOf(projectedRp(s)) : null };
 }
 const leftTxt = n => `~${n} more battle${n === 1 ? '' : 's'}`;
 function unplacedHtml(list, view) {
   return `<div class="unplaced">
     <div class="unplaced-h"><span>Unplaced</span><span class="muted">RP and rank show after placements: about ${PLACEMENT_HINT} battles at first, ${REPLACE_HINT} each new season</span></div>
     ${list.map(p => { const s = view.st[p.id], pl = placing(s); return `<a class="unplaced-row" href="#p-${esc(p.id)}">
-      ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}${pl.toward ? ` · tracking toward <span class="chip ${pl.toward.cls} sm">${pl.toward.name}</span>` : ''}</span></span>
-      <span class="un-prog" title="${s.games} played, ${leftTxt(pl.left)} to place"><i style="width:${Math.round(pl.pr * 100)}%"></i></span><span class="un-left">${leftTxt(pl.left)}</span>
+      ${avatar(p)}<span class="un-name"><span class="nm">${esc(p.name)}</span><span class="tag">${s.games ? `${s.games} ${s.games === 1 ? 'battle' : 'battles'} · ${s.w}-${s.l}${s.d ? '-' + s.d : ''}` : 'No battles yet'}${pl.toward ? ` · <span class="proj">projected <span class="chip ${pl.toward.cls} sm">${pl.toward.name}</span></span>` : ''}</span></span>
+      <span class="un-left">${leftTxt(pl.left)}</span>
     </a>`; }).join('')}
   </div>`;
 }
@@ -704,7 +704,7 @@ function viewPlayer(id, data, L, view) {
   const s = view.st[id], k = rank(s), placed = isPlaced(s);
   const order = ranking(data, view).filter(x => isPlaced(view.st[x.id])); const pos = order.findIndex(x => x.id === id);
   const pl = placed ? null : placing(s);
-  const rankTxt = p.archived ? 'Retired' : placed ? `#${pos + 1} of ${order.length}` : `Placing · ${leftTxt(pl.left)}${pl.toward ? `, tracking toward ${pl.toward.name}` : ''}`;
+  const rankTxt = p.archived ? 'Retired' : placed ? `#${pos + 1} of ${order.length}` : `Placing · ${leftTxt(pl.left)}${pl.toward ? `, projected ${pl.toward.name}` : ''}`;
   const mine = view.ms.filter(m => m.a === id || m.b === id);
   let best = null;
   for (const m of mine) {
