@@ -942,6 +942,24 @@ table.h2h .pl .nm{max-width:128px}
   .unplaced-row{grid-template-columns:auto 1fr 70px 38px}
   .rank-list li{grid-template-columns:1fr;gap:3px;justify-items:start}
 }
+
+/* ---------- rank extras: move chips, distribution, podium chip ---------- */
+.chip.rkmove{font-size:11px;padding:1px 7px}
+.chip.rkmove.sm{font-size:10px;padding:0 6px;margin:0 4px}
+.chip.rkmove.up{background:rgba(63,214,143,.1)}
+.chip.rkmove.down{background:rgba(242,123,139,.1)}
+.chip.rkmove.placed{background:rgba(74,144,255,.1)}
+.md-move{margin-top:6px}
+.pod .pod-rk{font-size:10.5px;padding:1px 7px;margin-top:-2px}
+.rank-dist{display:flex;height:26px;border-radius:8px;overflow:hidden;gap:2px}
+.rd-seg{display:grid;place-items:center;min-width:26px;background:currentColor;position:relative}
+.rd-seg b{color:#0b1222;font-size:12px;font-weight:800;mix-blend-mode:normal}
+.rd-rows{display:grid;gap:8px;margin-top:12px}
+.rd-row{display:grid;grid-template-columns:96px 1fr;gap:10px;align-items:center;font-size:13.5px}
+.rd-names{display:flex;flex-wrap:wrap;gap:4px 14px}
+.rd-names a{font-weight:650;text-decoration:none}
+.rd-names a:hover{text-decoration:underline}
+@media (max-width:560px){ .chip.rkmove.sm{display:block;width:max-content;margin:3px 0 0} .side.b .chip.rkmove.sm{margin-left:auto} .rd-row{grid-template-columns:82px 1fr} }
 </style>
 </head>
 <body>

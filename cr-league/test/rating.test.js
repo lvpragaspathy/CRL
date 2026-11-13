@@ -175,3 +175,15 @@ test('champion needs to be placed, not just to have 5 games', () => {
   assert.ok(!isPlaced(L.byKey['2026-10'].st.x), 'five games against one uncertain opponent is not enough to place');
   assert.deepEqual(L.champions, []);
 });
+
+test('every rated match records RP before and after for both sides, and peak RP tracks the high-water mark', () => {
+  const P = { x: { id: 'x' }, y: { id: 'y' } };
+  const t = Date.UTC(2026, 10, 5, 18);
+  const m1 = M('x', 'y', 3, 0, t), m2 = M('y', 'x', 1, 0, t + 3600e3);
+  const L = computeLeague({ players: P, matches: { [m1.id]: m1, [m2.id]: m2 } }, { tz: 'UTC', now: t + 7200e3 });
+  const v = L.byKey['2026-11'], d1 = v.delta[m1.id], d2 = v.delta[m2.id];
+  near(d1.rp.a0, 1500 - 2 * 350, 1e-9, 'x opens at the starting RP');
+  near(d2.rp.b0, d1.rp.a1, 1e-9, "x's RP after game 1 is the before of game 2");
+  assert.equal(d1.rp.placedA, false, 'one game is not enough to place');
+  assert.ok(v.st.x.peakScore >= v.st.x.scoreHist[1] && v.st.x.peakScore >= v.st.x.score, 'peak is the max RP seen');
+});

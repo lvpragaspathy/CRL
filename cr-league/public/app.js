@@ -229,13 +229,13 @@ function matchRow(m, data, view) {
   const hp = hpInfo(m);
   const lA = m.stats?.a?.leaked, lB = m.stats?.b?.leaked;
   const detail = [hp ? `Towers left: ${hp.hpA.toLocaleString()} vs ${hp.hpB.toLocaleString()} HP` : '', Number.isFinite(lA) && Number.isFinite(lB) ? `Elixir leaked: ${lA.toFixed(1)} vs ${lB.toFixed(1)}` : ''].filter(Boolean).join(' · ');
-  const side = (p, cls, won, d) => `<div class="side ${cls}${won ? ' won' : ''}">
-      ${cls === 'b' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
+  const side = (p, cls, won, d) => { const mv = moveChip(rankMove(dl, cls)); return `<div class="side ${cls}${won ? ' won' : ''}">
+      ${cls === 'b' ? mv : ''}${cls === 'b' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
       ${won && cls === 'b' ? CROWN : ''}
       <a href="#p-${esc(p.id)}">${esc(p.name)}</a>
       ${won && cls === 'a' ? CROWN : ''}
-      ${cls === 'a' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}
-    </div>`;
+      ${cls === 'a' && d != null ? `<span class="dl ${dCls(d)}">${fmtD(d)}</span>` : ''}${cls === 'a' ? mv : ''}
+    </div>`; };
   const acts = `<div class="row-acts">
       <button class="iconbtn" type="button" data-act="details" data-id="${esc(m.id)}" aria-label="Battle details">${ICON_OPEN}</button>
       ${writable() ? `<button class="iconbtn hide-sm" type="button" data-act="edit-match" data-id="${esc(m.id)}" aria-label="Edit match">${ICON_EDIT}</button>
@@ -297,6 +297,18 @@ function viewEmpty() {
 const RP_HELP = 'Ranked Points = the floor of your skill range (rating − 2×RD): the rating the system is about 95% sure you are above. Standings use it, so a hot start with few games can\'t top the table until it holds up.';
 const SR_HELP = 'Skill range: where the system thinks your true skill sits (rating ± 2×RD). It narrows as you play and widens while you are away. RP is its lower end.';
 const rankChip = (s, extra = '') => { const k = rank(s); return `<span class="chip ${k.cls}${extra}">${k.label}</span>`; };
+/** What a battle did to a player's rank: placed them, moved them up or down a division, or nothing. */
+function rankMove(dl, side) {
+  const rp = dl?.rp; if (!rp) return null;
+  const placedAfter = rp[side === 'a' ? 'placedA' : 'placedB'], preRd = side === 'a' ? dl.preRdA : dl.preRdB;
+  if (!placedAfter) return null;
+  const after = rankOf(rp[side + '1']);
+  if (preRd > PROVISIONAL_RD) return { kind: 'placed', to: after };
+  const before = rankOf(rp[side + '0']);
+  if (after.ord === before.ord) return null;
+  return { kind: after.ord > before.ord ? 'up' : 'down', to: after, from: before };
+}
+const moveChip = (mv, small = true) => (mv ? `<span class="chip rkmove ${mv.kind} ${mv.to.cls}${small ? ' sm' : ''}" title="${mv.kind === 'placed' ? 'Placements done' : mv.kind === 'up' ? `Promoted from ${mv.from.label}` : `Demoted from ${mv.from.label}`}">${mv.kind === 'placed' ? 'Placed · ' : mv.kind === 'up' ? '▲ ' : '▼ '}${mv.to.label}</span>` : '');
 const skillRange = s => `${R(s.r - 2 * s.rd)} – ${R(s.r + 2 * s.rd)}`;
 // RP cell: the number, the change from the last battle, and the rank underneath.
 function ratingCell(s) {
@@ -606,6 +618,7 @@ function matchDetail(id) {
       ${prob != null ? `<div class="md-odds">${fmtPct(prob)} to win</div>` : ''}
       ${rpd != null ? `<div class="md-rating num"><span>${R(rp[s + '0'])} → ${R(rp[s + '1'])}</span> <span class="${dCls(rpd)}">${fmtD(rpd)} RP</span></div>` : d != null ? '<div class="md-rating muted">Placing</div>' : m.ranked ? '' : '<div class="md-rating muted">Unrated</div>'}
       ${d != null ? `<div class="md-skill muted num" title="${SR_HELP}">skill ${fmtD(d)}</div>` : ''}
+      ${moveChip(rankMove(dl, s), false) ? `<div class="md-move">${moveChip(rankMove(dl, s), false)}</div>` : ''}
     </div>`; };
   const lk = s => m.stats?.[s]?.leaked;
   const lA = lk('a'), lB = lk('b'), lMax = Math.max(5, lA || 0, lB || 0);
@@ -689,6 +702,9 @@ function viewPlayer(id, data, L, view) {
     if (!best || opp > best.r) best = { r: opp, oppId: isA ? m.b : m.a };
   }
   const titles = L.champions.filter(c => c.id === id);
+  // Highest rank ever reached, shown when it beats what this view shows.
+  const allPeak = Math.max(L.all.st[id]?.peakScore ?? -Infinity, ...L.seasons.map(sk => L.byKey[sk]?.st[id]?.peakScore ?? -Infinity));
+  const bestEver = L.all.st[id]?.games && (!placed || rankOf(allPeak).ord > rankOf(s.peakScore).ord) && isFinite(allPeak) && allPeak >= RANKS[0].min ? rankOf(allPeak) : null;
   const pcl = clutch(data, view).find(r => r.id === id), plk = leaks(data, view).find(r => r.id === id);
   const h2h = Object.entries(s.h2h).sort((a, b) => b[1].n - a[1].n);
   const w = writable();
@@ -702,11 +718,11 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
+        <div class="meta"><span class="chip ${k.cls}">${k.label}</span><span class="mi">${rankTxt}</span>${bestEver ? `<span class="chip ${bestEver.cls}" title="Highest rank reached, all time">Best: ${bestEver.label}</span>` : ''}${p.tag ? `<span class="chip track on" title="Battles are imported automatically from this tag's battle log">${esc(p.tag)} · auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}${ladderChip(p)}<span class="mi">Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
         ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
       <div class="big"><div class="k" title="${RP_HELP}">Ranked Points</div><div class="rating num${placed ? '' : ' muted'}">${placed ? R(s.score) : '—'}</div>
-        <div class="muted" style="font-size:13px">${placed ? `Peak ${R(s.peakScore)} RP${s.lastScore != null ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}` : s.games ? 'Shown once placed' : 'Play a friendly to start'}</div>
+        <div class="muted" style="font-size:13px">${placed ? `Peak ${R(s.peakScore)} RP · ${rankOf(s.peakScore).label}${s.lastScore != null ? ` · last <span class="${dCls(s.lastScore)}">${fmtD(s.lastScore)}</span>` : ''}` : s.games ? 'Shown once placed' : 'Play a friendly to start'}</div>
         <div class="muted srange" title="${SR_HELP}">Skill range <b class="num">${skillRange(s)}</b><span class="hide-sm"> · centre ${R(s.r)}</span></div></div>
       ${w ? `<div class="tools">
         <button class="btn small" type="button" data-act="log" data-id="${esc(id)}">Log a match</button>
@@ -753,6 +769,20 @@ const nameOf = (data, id) => esc(data.players[id]?.name || '?');
 const pctOrDash = v => (v == null ? '—' : fmtPct(v));
 const rec3 = o => `${o.w}-${o.l}${o.d ? '-' + o.d : ''}`;
 
+// How the placed players spread across the ranks in this view.
+function rankDistHtml(data, view) {
+  const placed = Object.values(data.players).filter(p => !p.archived && view.st[p.id] && isPlaced(view.st[p.id]));
+  if (!placed.length) return '';
+  const by = new Map(RANKS.map(k => [k.name, []]));
+  for (const p of placed) by.get(rank(view.st[p.id]).name).push(p);
+  const total = placed.length;
+  const segs = RANKS.slice().reverse().filter(k => by.get(k.name).length).map(k => { const n = by.get(k.name).length; return `<span class="rd-seg ${k.cls}" style="flex:${n}" title="${k.name}: ${by.get(k.name).map(p => p.name).join(', ')}"><b>${n}</b></span>`; }).join('');
+  const rows = RANKS.slice().reverse().filter(k => by.get(k.name).length).map(k => `<div class="rd-row"><span class="chip ${k.cls}">${k.name}</span><span class="rd-names">${by.get(k.name).map(p => { const s = view.st[p.id], kk = rank(s); return `<a href="#p-${esc(p.id)}">${esc(p.name)}<small class="muted"> ${kk.div ? ['', 'I', 'II', 'III'][kk.div] : ''}</small></a>`; }).join('')}</span></div>`).join('');
+  return `<section class="panel">
+    <div class="panel-h"><h2>Ranks</h2><span class="muted" style="font-size:13px">${total} placed</span></div>
+    <div class="panel-b"><div class="rank-dist" role="img" aria-label="Players per rank">${segs}</div><div class="rd-rows">${rows}</div></div>
+  </section>`;
+}
 function raceChart(data, RC) {
   if (!RC.series.length) return '<p class="muted" style="margin:0">No rated battles in this view yet.</p>';
   const W = narrow() ? 430 : 760, H = narrow() ? 300 : 300, l = 40, r = narrow() ? 104 : 120, t = 14, b = 28;
@@ -854,6 +884,7 @@ function viewStats(data, L, view) {
     <div class="panel-h"><h2>${key === 'all' ? 'RP race, all time' : 'Season race'}</h2><span class="muted" style="font-size:13px">RP after every rated battle, step by step</span></div>
     <div class="panel-b">${raceChart(data, RC)}</div>
   </section>
+  ${rankDistHtml(data, view)}
   <section class="panel">
     <div class="panel-h"><h2>Record book</h2><span class="muted" style="font-size:13px">All time</span></div>
     <div class="panel-b records">${rec.length ? rec.map(r => recordCard(data, r)).join('') : '<p class="muted" style="margin:0">Records appear once a few battles are in.</p>'}</div>
@@ -1171,7 +1202,7 @@ function introHtml(data, L, reason) {
     const s = view.st[p.id];
     return `<a class="pod p${place}" href="#p-${esc(p.id)}" data-act="enter-to" data-href="#p-${esc(p.id)}">
       ${place === 1 ? CROWN.replace('class="crown"', 'class="crown-top"') : ''}
-      ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="rt num">${R(s.score)}</span>
+      ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="rt num">${R(s.score)}</span>${rankChip(s, ' pod-rk')}
       <div class="block">${place}</div></a>`;
   };
   const podium = top3.length
