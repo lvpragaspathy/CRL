@@ -607,7 +607,10 @@ h4.sub{font-stretch:75%;text-transform:uppercase;letter-spacing:.1em;font-size:1
 
 /* ---------- scrollbars: thin and dark everywhere ---------- */
 :root{scrollbar-color:#33446f var(--bg)}
-.dlg-b,.table-wrap,.champs,nav.tabs,::picker(select){scrollbar-color:#33446f transparent;scrollbar-width:thin}
+.dlg-b,.table-wrap,.champs,::picker(select){scrollbar-color:#33446f transparent;scrollbar-width:thin}
+/* The tab row never shows a scrollbar: it fits on desktop, and phones use the bottom bar. */
+nav.tabs{overflow-y:hidden;scrollbar-width:none}
+nav.tabs::-webkit-scrollbar{display:none}
 ::-webkit-scrollbar{width:10px;height:10px;background:transparent}
 ::-webkit-scrollbar-thumb{background:#33446f;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-thumb:hover{background-color:#45588a}
