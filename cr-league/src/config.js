@@ -18,6 +18,8 @@ export const config = {
   crToken: process.env.CR_API_TOKEN || '',
   crBase: (process.env.CR_API_BASE || 'https://proxy.royaleapi.dev/v1').replace(/\/+$/, ''),
   pollMinutes: Math.max(2, Number(process.env.POLL_MINUTES) || 10),
+  // Ladder trophies change slowly and only show on profiles, so profiles are refreshed less often.
+  profileMinutes: Math.max(10, Number(process.env.PROFILE_MINUTES) || 60),
   // Battle log "type" values that count as league friendlies.
   friendlyTypes: (process.env.FRIENDLY_TYPES || 'friendly,clanMate')
     .split(',').map(s => s.trim()).filter(Boolean),

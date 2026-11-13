@@ -504,6 +504,42 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:.9em;background:var(--pa
   .heat .hh{font-size:8.5px}
   nav.tabs a{padding:10px 8px}
 }
+
+/* ---------- polish: icons, sorting, compact tables ---------- */
+.medal{width:15px;height:15px;flex:none;vertical-align:-2px}
+.champ .medal{width:14px;height:14px}
+.champcard .medal{width:26px;height:26px}
+.title-chip .medal{width:14px;height:14px}
+.ladder{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 9px 1px 6px}
+.ladder .trophy{width:14px;height:14px;fill:#ffb347}
+.chip,.ladder,.title-chip,.auto,.evotag{white-space:nowrap}
+th.sortable{padding:0}
+th.sortable button{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:4px;width:100%;padding:10px 12px;cursor:pointer;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;white-space:nowrap}
+th.sortable.r button{justify-content:flex-end}
+th.sortable button:hover{color:var(--ink)}
+th.sortable button:focus-visible{outline:2px solid var(--gold);outline-offset:-2px;border-radius:6px}
+th.sortable[aria-sort="ascending"] button,th.sortable[aria-sort="descending"] button{color:var(--gold)}
+.sarr{display:inline-block;width:.8em;font-size:12px}
+.table-wrap{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.table-wrap::-webkit-scrollbar{height:6px}
+.table-wrap::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+table.compact th{white-space:normal;padding:8px;vertical-align:bottom}
+table.compact td{padding:9px 8px}
+table.compact .pl .nm{max-width:150px}
+table.compact .leakbar{width:36px}
+.tilt td .games{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:1px}
+@media (max-width:1100px){ table.compact .leakbar{display:none} }
+@media (max-width:1240px){ .hide-lg{display:none} }
+@media (max-width:860px){ th.sortable button{padding:10px 7px} td{padding:11px 7px} .rank{width:34px} }
+@media (max-width:560px){
+  td{padding:9px 5px} th.sortable button{padding:9px 5px} .rank{width:28px}
+  table.compact.tilt .pl .nm{max-width:84px} table.compact.tilt .av{width:26px;height:26px;font-size:11px}
+}
+@media (max-width:560px){
+  th.sortable button{padding:9px 6px}
+  table.compact .pl .nm{max-width:110px}
+  table.compact td,table.compact th{padding:8px 5px}
+}
 </style>
 </head>
 <body>

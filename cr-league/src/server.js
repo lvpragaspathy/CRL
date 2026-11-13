@@ -61,9 +61,11 @@ export async function createApp({ store, poller, cfg = config }) {
       return store.insertPlayer({ id: newId('p'), createdAt: Date.now(), ...fields });
     }],
     ['PATCH', /^\/api\/players\/([\w-]+)$/, true, async (req, [id], body) => {
-      if (!(await store.getPlayer(id))) throw new HttpError(404, 'That player no longer exists.');
+      const existingPlayer = await store.getPlayer(id);
+      if (!existingPlayer) throw new HttpError(404, 'That player no longer exists.');
       const fields = playerInput(body, { partial: true });
       if ('tag' in fields && await store.tagTaken(fields.tag, id)) throw new HttpError(409, `Another player already has the tag ${fields.tag}.`);
+      if ('tag' in fields && fields.tag !== existingPlayer.tag) fields.ladder = null; // trophies belonged to the old tag
       if ('name' in fields && (await store.listPlayers()).some(x => x.id !== id && x.name.toLowerCase() === fields.name.toLowerCase())) throw new HttpError(409, 'Someone in the league already has that name.');
       return store.updatePlayer(id, fields);
     }],

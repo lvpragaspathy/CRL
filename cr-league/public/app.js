@@ -10,6 +10,10 @@ import {
 const MODES = ['Classic', 'Triple Elixir', 'Draft', 'Sudden Death', 'Mega Deck', 'Other'];
 const COLORS = ['#4a90ff', '#ff5367', '#ffc63a', '#3fd68f', '#b783ff', '#ff8a3d', '#2fd3e0', '#ff74be'];
 const CROWN = '<svg class="crown" viewBox="0 0 24 20" aria-hidden="true"><path d="M2 6l5 4 5-8 5 8 5-4-2 11H4z"/><rect x="4" y="17" width="16" height="2.5" rx="1"/></svg>';
+// Season champion: a medal on a blue/red ribbon (the crown already means #1 and match winner).
+const MEDAL = '<svg class="medal" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 1h5l2.2 7.5H8.4z" fill="#4a90ff"/><path d="M18 1h-5l-2.2 7.5h4.8z" fill="#ff5367"/><circle cx="12" cy="15.5" r="7.2" fill="#ffc63a"/><circle cx="12" cy="15.5" r="5.3" fill="none" stroke="#9a6a00" stroke-width="1.2"/><path d="M12 11.6l1.15 2.35 2.6.38-1.88 1.83.44 2.58L12 17.52l-2.31 1.22.44-2.58-1.88-1.83 2.6-.38z" fill="#9a6a00"/></svg>';
+// Ladder trophies use the game's own convention: a trophy cup.
+const TROPHY = '<svg class="trophy" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h10v2h3.5v3.2A4.3 4.3 0 0116.6 11.5 5.3 5.3 0 0113 14.9V18h3.5v3.5h-9V18H11v-3.1a5.3 5.3 0 01-3.6-3.4A4.3 4.3 0 013.5 7.2V4H7zm0 4H5.5v1.2A2.3 2.3 0 007 9.3zm10 0v3.3a2.3 2.3 0 001.5-2.1V6z"/></svg>';
 const ICON_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.2V20h2.8l8.3-8.3-2.8-2.8zM19.7 7.1a1 1 0 000-1.4l-1.4-1.4a1 1 0 00-1.4 0l-1.6 1.6 2.8 2.8z"/></svg>';
 const ICON_DEL = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 21a2 2 0 01-2-2V7h14v12a2 2 0 01-2 2zM9 9v9h2V9zm4 0v9h2V9zM15.5 4H19v2H5V4h3.5l1-1h5z"/></svg>';
 const PW_KEY = 'crl-password';
@@ -30,6 +34,7 @@ const S = {
   pa: '', pb: '',      // matchup predictor picks
   matchLimit: 50,
   tune: null,          // last Lab tuning result
+  sort: { key: null, dir: 'desc' }, // standings column sort; null = placement
 };
 const D = () => S.demo || S.data;
 const writable = () => !!S.demo || (S.editable && S.unlocked);
@@ -144,7 +149,7 @@ const avatar = (p, lg) => `<span class="av${lg ? ' lg' : ''}" style="background:
 const formHtml = f => f.length ? `<span class="form" aria-label="Last ${f.length}: ${f.join(' ')}">${f.map(r => `<i class="${r}">${r}</i>`).join('')}</span>` : '<span class="muted">—</span>';
 const streakHtml = s => s.streakN >= 1 && s.streakT ? `<span class="chip streak ${s.streakT}">${s.streakT}${s.streakN}</span>` : '<span class="muted">—</span>';
 const fmtPct = p => Math.round(p * 100) + '%';
-const champChip = (L, id) => L.champCount[id] ? `<span class="champ" title="${L.champCount[id]}× season champion">${CROWN}${L.champCount[id] > 1 ? L.champCount[id] + '×' : ''}</span>` : '';
+const champChip = (L, id) => L.champCount[id] ? `<span class="champ" title="${L.champCount[id]}× season champion">${MEDAL}${L.champCount[id] > 1 ? L.champCount[id] + '×' : ''}</span>` : '';
 function spark(vals, w = 96, h = 28) {
   if (vals.length < 3) return '<span class="muted">—</span>';
   const v = vals.slice(-15), mn = Math.min(...v), mx = Math.max(...v), span = Math.max(mx - mn, 12), mid = (mx + mn) / 2;
@@ -279,6 +284,35 @@ function viewEmpty() {
 function ratingCell(s) {
   return `<span class="rating num">${R(s.r)}</span>${s.last != null ? `<span class="delta ${dCls(s.last)}">${fmtD(s.last)}</span>` : ''}<span class="rd num" title="Rating deviation: how sure the rating is. Lower is more certain.">±${R(s.rd)}</span>`;
 }
+/* ---------- standings sorting ---------- */
+const SORT_KEYS = {
+  name: { dir: 'asc', val: (p) => p.name.toLowerCase() },
+  rating: { dir: 'desc', val: (p, s) => s.r },
+  wl: { dir: 'desc', val: (p, s) => s.w * 1000 - s.l },
+  pct: { dir: 'desc', val: (p, s) => (s.games ? (s.w + 0.5 * s.d) / s.games : null) },
+  cpg: { dir: 'desc', val: (p, s) => (s.games ? s.cf / s.games : null) },
+  streak: { dir: 'desc', val: (p, s) => (s.streakT === 'W' ? s.streakN : s.streakT === 'L' ? -s.streakN : 0) },
+};
+function sortRows(rows, view) {
+  const k = S.sort.key, def = SORT_KEYS[k];
+  if (k === 'rank') return rows.slice().reverse(); // '#' clicked: worst placement first
+  if (!def) return rows;
+  const sign = S.sort.dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const va = def.val(a, view.st[a.id]), vb = def.val(b, view.st[b.id]);
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;   // players with no games stay at the bottom either way
+    if (vb == null) return -1;
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sign || rows.indexOf(a) - rows.indexOf(b);
+  });
+}
+function sortTh(key, label, cls = '') {
+  const on = S.sort.key === key || (key === 'rank' && !S.sort.key);
+  const dir = !on ? null : key === 'rank' ? (S.sort.key === 'rank' ? 'desc' : 'asc') : S.sort.dir;
+  const aria = on ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const arrow = on ? (dir === 'asc' ? '↑' : '↓') : '';
+  return `<th class="sortable ${cls}" aria-sort="${aria}"><button type="button" data-act="sort" data-key="${key}">${label}<span class="sarr" aria-hidden="true">${arrow}</span></button></th>`;
+}
 function viewStandings(data, L, view) {
   const rows = ranking(data, view);
   if (!Object.keys(data.players).length) return viewEmpty();
@@ -294,8 +328,11 @@ function viewStandings(data, L, view) {
     <div><div class="k">On fire</div><div class="v">${hot ? esc(hot.name) : '—'}</div><div class="s">${hot ? view.st[hot.id].streakN + ' wins in a row' : 'Nobody on a 2+ win streak'}</div></div>
     <div><div class="k">Biggest rivalry</div><div class="v">${top ? top.split('|').map(id => esc(data.players[id].name)).join(' <span class="muted">vs</span> ') : '—'}</div><div class="s">${top ? pairs[top] + (pairs[top] === 1 ? ' battle' : ' battles') : 'Play a friendly to start one'}</div></div>
   </section>`;
-  const body = rows.map((p, i) => {
-    const s = view.st[p.id], t = tier(s), rk = s.games ? i + 1 : '–';
+  // Placement is fixed by rating; sorting only reorders the rows, each row keeps its placement number.
+  const place = new Map(rows.map((p, i) => [p.id, view.st[p.id].games ? i + 1 : '–']));
+  const shown = sortRows(rows, view);
+  const body = shown.map(p => {
+    const s = view.st[p.id], t = tier(s), rk = place.get(p.id);
     return `<tr class="link" data-href="#p-${esc(p.id)}">
       <td class="rank${rk === 1 ? ' first' : ''}">${rk === 1 ? CROWN : ''}${rk}</td>
       <td><a class="pl" href="#p-${esc(p.id)}">${avatar(p)}<span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}${champChip(L, p.id)}</span>${p.tag ? `<span class="tag">${esc(p.tag)}</span>` : '<span class="tag">No tag, not auto-tracked</span>'}</span></a></td>
@@ -312,13 +349,13 @@ function viewStandings(data, L, view) {
   const retired = Object.values(data.players).filter(p => p.archived);
   const champs = L.champions.length ? `<section class="panel">
       <div class="panel-h"><h2>Season champions</h2><span class="muted" style="font-size:13px">Highest rating at month's end, ${MIN_CHAMP_GAMES}+ battles</span></div>
-      <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${CROWN}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num">${R(c.r)}</span></a>` : ''; }).join('')}</div>
+      <div class="panel-b champs">${L.champions.map(c => { const p = data.players[c.id]; return p ? `<a class="champcard" href="#p-${esc(p.id)}">${MEDAL}<span class="cs">${esc(seasonLabel(c.key))}</span>${avatar(p)}<span class="cn">${esc(p.name)}</span><span class="cr num">${R(c.r)}</span></a>` : ''; }).join('')}</div>
     </section>` : '';
   return seasonBar(L) + strip + `<section class="panel">
     <div class="panel-h"><h2>Standings</h2><span class="muted hide-sm" style="font-size:13px">Click a player for their profile</span></div>
     <div class="panel-b table-wrap" style="padding-top:6px">
       <table>
-        <thead><tr><th>#</th><th>Player</th><th>Rating</th><th class="hide-sm">Tier</th><th>W-L</th><th class="r hide-sm">Win %</th><th class="r hide-md">Crowns/g</th><th class="hide-sm">Streak</th><th class="hide-md">Last 5</th><th class="hide-md">Trend</th></tr></thead>
+        <thead><tr>${sortTh('rank', '#')}${sortTh('name', 'Player')}${sortTh('rating', 'Rating')}<th class="hide-sm">Tier</th>${sortTh('wl', 'W-L')}${sortTh('pct', 'Win %', 'r hide-sm')}${sortTh('cpg', 'Crowns/g', 'r hide-md')}${sortTh('streak', 'Streak', 'hide-sm')}<th class="hide-md">Last 5</th><th class="hide-md">Trend</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>
@@ -432,6 +469,13 @@ function cardsSection(id, data, view) {
     </div>
   </section>`;
 }
+// Ladder trophies live only here, kept small: the league is about league rating.
+function ladderChip(p) {
+  const t = p.ladder?.trophies;
+  if (!Number.isFinite(t)) return '';
+  const best = Number.isFinite(p.ladder.best) ? ` · best ${p.ladder.best.toLocaleString()}` : '';
+  return `<span class="ladder" title="Ladder trophies outside the league${best} · updated ${ago(p.ladder.at)}">${TROPHY}<span class="num">${t.toLocaleString()}</span></span>`;
+}
 function viewPlayer(id, data, L, view) {
   const p = data.players[id];
   if (!p) return `<section class="panel"><div class="panel-b"><p style="margin:0">That player isn't in this league. <a href="#standings">Back to standings</a></p></div></section>`;
@@ -460,14 +504,14 @@ function viewPlayer(id, data, L, view) {
       ${avatar(p, true)}
       <div class="who">
         <h2>${esc(p.name)}</h2>
-        <div class="meta"><span class="chip ${t.cls}">${t.name}</span><span>${rankTxt}</span>${p.tag ? `<span>· ${esc(p.tag)}</span><span class="chip track on">Auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}<span>· Joined ${esc(fmtDate(p.createdAt, false))}</span></div>
-        ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${CROWN}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
+        <div class="meta"><span class="chip ${t.cls}">${t.name}</span><span>${rankTxt}</span>${p.tag ? `<span>· ${esc(p.tag)}</span><span class="chip track on">Auto-tracked</span>` : '<span class="chip track">No tag, not auto-tracked</span>'}<span>· Joined ${esc(fmtDate(p.createdAt, false))}</span>${ladderChip(p)}</div>
+        ${titles.length ? `<div class="titles">${titles.map(c => `<span class="title-chip">${MEDAL}${esc(seasonLabel(c.key))} champion</span>`).join('')}</div>` : ''}
       </div>
       <div class="big"><div class="k">Rating</div><div class="rating num">${R(s.r)}</div><div class="muted" style="font-size:13px">±${R(s.rd)} · Peak ${R(s.peak)}${s.last != null ? ` · last <span class="${dCls(s.last)}">${fmtD(s.last)}</span>` : ''}</div></div>
       ${w ? `<div class="tools">
         <button class="btn small" type="button" data-act="log" data-id="${esc(id)}">Log a match</button>
         <button class="btn small" type="button" data-act="edit-player" data-id="${esc(id)}">Edit profile</button>
-        ${p.archived ? `<button class="btn small" type="button" data-act="restore" data-id="${esc(id)}">Bring back</button>` : `<button class="btn small" type="button" data-act="retire" data-id="${esc(id)}">Retire</button>`}
+        ${p.archived ? `<button class="btn small" type="button" data-act="restore" data-id="${esc(id)}">Bring back</button>` : `<button class="btn small danger" type="button" data-act="retire" data-id="${esc(id)}">Retire</button>`}
         ${L.all.st[id].games === 0 ? `<button class="btn small danger" type="button" data-act="del-player" data-id="${esc(id)}">Delete</button>` : ''}
       </div>` : ''}
     </div>
@@ -491,9 +535,9 @@ function viewPlayer(id, data, L, view) {
     </section>
     <section class="panel">
       <div class="panel-h"><h2>Head to head</h2></div>
-      <div class="panel-b table-wrap">${h2h.length ? `<table><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-sm">Crowns</th><th class="r">Rating won</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
+      <div class="panel-b table-wrap">${h2h.length ? `<table class="compact"><thead><tr><th>Opponent</th><th>W-L</th><th class="r hide-lg">Crowns</th><th class="r">Rating won</th><th class="r" title="Chance to win the next game, from current ratings">Next game</th></tr></thead><tbody>${h2h.map(([oid, h]) => {
         const o = data.players[oid]; const pw = winProb(L.live[id], L.live[oid]);
-        return `<tr><td><a class="pl" href="#p-${esc(oid)}">${avatar(o)}<span class="nm">${esc(o.name)}</span></a></td><td class="num">${h.w}-${h.l}${h.d ? '-' + h.d : ''}</td><td class="num r hide-sm">${h.cf}–${h.ca}</td><td class="num r ${dCls(h.net)}">${fmtD(h.net)}</td><td class="num r ${pw >= 0.5 ? 'up' : 'down'}">${fmtPct(pw)}</td></tr>`;
+        return `<tr><td><a class="pl" href="#p-${esc(oid)}">${avatar(o)}<span class="nm">${esc(o.name)}</span></a></td><td class="num">${h.w}-${h.l}${h.d ? '-' + h.d : ''}</td><td class="num r hide-lg">${h.cf}–${h.ca}</td><td class="num r ${dCls(h.net)}">${fmtD(h.net)}</td><td class="num r ${pw >= 0.5 ? 'up' : 'down'}">${fmtPct(pw)}</td></tr>`;
       }).join('')}</tbody></table>` : '<p class="muted" style="margin:0">No battles in this view.</p>'}</div>
     </section>
   </div>
@@ -569,17 +613,21 @@ function viewStats(data, L, view) {
   const mt = meta(data, view), hm = heatmap(view, tz());
   const hpGames = view.ms.filter(m => hpInfo(m)).length;
 
-  const clutchTbl = cl.length ? `<table><thead><tr><th>Player</th><th>Close games</th><th class="r">Win %</th><th class="r" title="Average remaining tower HP minus the opponent's">HP edge</th></tr></thead><tbody>
+  const clutchTbl = cl.length ? `<table class="compact"><thead><tr><th>Player</th><th>Close games</th><th class="r">Win %</th><th class="r" title="Average remaining tower HP minus the opponent's">HP edge</th></tr></thead><tbody>
     ${cl.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num">${r.close.n ? rec3(r.close) : '—'}</td><td class="num r ${r.closeRate == null ? '' : r.closeRate >= 0.5 ? 'up' : 'down'}">${pctOrDash(r.closeRate)}</td><td class="num r ${r.avgMargin >= 0 ? 'up' : 'down'}">${r.avgMargin >= 0 ? '+' : '−'}${Math.abs(R0(r.avgMargin)).toLocaleString()}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with tower HP.</p>';
-  const leakTbl = lk.length ? `<table><thead><tr><th>Player</th><th class="r">Leaked / game</th><th class="r">In wins</th><th class="r">In losses</th></tr></thead><tbody>
+  const leakTbl = lk.length ? `<table class="compact"><thead><tr><th>Player</th><th class="r">Leaked / game</th><th class="r">In wins</th><th class="r">In losses</th></tr></thead><tbody>
     ${lk.map(r => `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td><td class="num r"><span class="leakbar"><i style="width:${Math.min(100, r.avg * 10)}%"></i></span>${r.avg.toFixed(1)}</td><td class="num r">${r.avgWin == null ? '—' : r.avgWin.toFixed(1)}</td><td class="num r">${r.avgLoss == null ? '—' : r.avgLoss.toFixed(1)}</td></tr>`).join('')}
     </tbody></table>` : '<p class="muted" style="margin:0">Needs auto-imported battles with elixir data.</p>';
-  const tiltTbl = tl.length ? `<table><thead><tr><th>Player</th><th class="r">After a win</th><th class="r">After a loss</th><th class="r hide-sm">1st game of session</th><th class="r hide-sm">Later games</th></tr></thead><tbody>
-    ${tl.map(r => { const gap = r.afterWRate != null && r.afterLRate != null ? r.afterWRate - r.afterLRate : null; return `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a>${gap != null && Math.abs(gap) >= 0.2 && r.afterL.n >= 3 ? `<span class="chip ${gap > 0 ? 'tiltchip' : 'calmchip'}">${gap > 0 ? 'Tilts' : 'Bounces back'}</span>` : ''}</td>
-      <td class="num r">${pctOrDash(r.afterWRate)} <span class="muted">(${r.afterW.n})</span></td><td class="num r">${pctOrDash(r.afterLRate)} <span class="muted">(${r.afterL.n})</span></td>
-      <td class="num r hide-sm">${pctOrDash(r.firstRate)} <span class="muted">(${r.first.n})</span></td><td class="num r hide-sm">${pctOrDash(r.laterRate)} <span class="muted">(${r.later.n})</span></td></tr>`; }).join('')}
-    </tbody></table><p class="muted chart-note">Win rate in each situation, games in brackets. A new session starts after a ${SESSION_GAP_MIN}+ minute break. "Tilts" means 20+ points worse after a loss than after a win (3+ games).</p>` : '<p class="muted" style="margin:0">Not enough games yet.</p>';
+  const tiltCell = (rate, o, cls = '') => `<td class="num r ${cls}">${pctOrDash(rate)}<span class="games">${o.n} game${o.n === 1 ? '' : 's'}</span></td>`;
+  const tiltTbl = tl.length ? `<table class="compact tilt"><thead><tr><th>Player</th><th class="r">After a win</th><th class="r">After a loss</th><th class="r hide-md">1st game of a session</th><th class="r hide-md">Later games</th><th>Verdict</th></tr></thead><tbody>
+    ${tl.map(r => {
+      const gap = r.afterWRate != null && r.afterLRate != null ? r.afterWRate - r.afterLRate : null;
+      const verdict = gap != null && Math.abs(gap) >= 0.2 && r.afterL.n >= 3 ? `<span class="chip ${gap > 0 ? 'tiltchip' : 'calmchip'}">${gap > 0 ? 'Tilts' : 'Resilient'}</span>` : '<span class="muted">—</span>';
+      return `<tr><td><a class="pl" href="#p-${esc(r.id)}">${avatar(data.players[r.id])}<span class="nm">${nameOf(data, r.id)}</span></a></td>
+        ${tiltCell(r.afterWRate, r.afterW)}${tiltCell(r.afterLRate, r.afterL)}${tiltCell(r.firstRate, r.first, 'hide-md')}${tiltCell(r.laterRate, r.later, 'hide-md')}<td>${verdict}</td></tr>`;
+    }).join('')}
+    </tbody></table><p class="muted chart-note">Win rate in each situation. A new session starts after a ${SESSION_GAP_MIN}+ minute break. "Tilts" means 20+ points worse after a loss than after a win (3+ games after a loss); "Resilient" is the reverse.</p>` : '<p class="muted" style="margin:0">Not enough games yet.</p>';
   const metaHtml = mt.decks ? `<div class="cardcols">
       <div><h3 class="sub">Archetypes</h3><table><thead><tr><th>Deck type</th><th class="r">Played</th><th class="r">Win %</th><th class="hide-sm">Main pilots</th></tr></thead><tbody>
         ${mt.archetypes.slice(0, 10).map(a => `<tr><td><b>${esc(a.name)}</b></td><td class="num r">${a.n}</td><td class="num r ${a.rate >= 0.5 ? 'up' : 'down'}">${fmtPct(a.rate)}</td><td class="hide-sm muted" style="white-space:normal">${a.mains.slice(0, 3).map(x => `${nameOf(data, x.pid)} (${x.n})`).join(', ')}</td></tr>`).join('')}
@@ -1130,7 +1178,7 @@ function makeDemo() {
   const skill = [1680, 1610, 1550, 1500, 1460, 1400];
   const now = Date.now(), dayMs = 864e5, span = 75;
   const players = {}, ids = [];
-  names.forEach((n, i) => { const id = 'demo' + i; ids.push(id); players[id] = { id, name: n[0], tag: n[1], deck: n[2], color: COLORS[i], archived: false, createdAt: now - (span + 5) * dayMs }; });
+  names.forEach((n, i) => { const id = 'demo' + i; ids.push(id); players[id] = { id, name: n[0], tag: n[1], deck: n[2], color: COLORS[i], archived: false, createdAt: now - (span + 5) * dayMs, ladder: n[1] ? { trophies: 9000 - i * 650, best: 9400 - i * 500, at: now - 20 * 60000 } : null }; });
   const matches = {};
   const N = 120;
   for (let k = 0; k < N; k++) {
@@ -1166,6 +1214,17 @@ document.addEventListener('click', async e => {
   if (act === 'enter-to') { e.preventDefault(); enterLeague(b.dataset.href); return; }
   if (act === 'demo-on') { S.demo = makeDemo(); S.season = ''; location.hash = '#standings'; render(); return; }
   if (act === 'demo-off') { S.demo = null; S.season = ''; render(); return; }
+  if (act === 'sort') {
+    // Click cycles: column's natural direction -> reversed -> back to placement order.
+    const key = b.dataset.key, cur = S.sort;
+    if (key === 'rank') S.sort = cur.key === null ? { key: 'rank', dir: 'desc' } : { key: null, dir: 'desc' };
+    else if (cur.key !== key) S.sort = { key, dir: SORT_KEYS[key].dir };
+    else if (cur.dir === SORT_KEYS[key].dir) S.sort = { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' };
+    else S.sort = { key: null, dir: 'desc' };
+    render();
+    document.querySelector(`th [data-key="${key}"]`)?.focus();
+    return;
+  }
   if (act === 'more') { S.matchLimit += 50; render(); return; }
   if (act === 'recap-dl') {
     const blob = await recapBlob(); if (!blob) return;

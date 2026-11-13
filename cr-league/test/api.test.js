@@ -16,13 +16,20 @@ const listen = srv => new Promise(r => srv.listen(0, '127.0.0.1', () => r(`http:
 before(async () => {
   cr = http.createServer((req, res) => {
     if (req.headers.authorization !== 'Bearer good-token') { res.writeHead(403).end('{"reason":"accessDenied.invalidIp"}'); return; }
+    const prof = /^\/v1\/players\/([^/]+)$/.exec(req.url);
+    if (prof) {
+      const tag = decodeURIComponent(prof[1]);
+      if (!logs[tag]) { res.writeHead(404).end('{}'); return; }
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ tag, trophies: 7123, bestTrophies: 7600 }));
+      return;
+    }
     const m = /^\/v1\/players\/([^/]+)\/battlelog$/.exec(req.url);
     const tag = m && decodeURIComponent(m[1]);
     if (!tag || !logs[tag]) { res.writeHead(404).end('{}'); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(logs[tag]));
   });
   const crBase = await listen(cr);
-  cfg = { timezone: 'America/Chicago', crToken: 'good-token', crBase: crBase + '/v1', pollMinutes: 10, friendlyTypes: ['friendly', 'clanMate'], inferTiebreak: true, linkWindowMinutes: 15, password: PW };
+  cfg = { timezone: 'America/Chicago', profileMinutes: 60, crToken: 'good-token', crBase: crBase + '/v1', pollMinutes: 10, friendlyTypes: ['friendly', 'clanMate'], inferTiebreak: true, linkWindowMinutes: 15, password: PW };
   const store = createMemoryStore();
   poller = createPoller({ store, config: cfg, log: { info() {} } });
   app = http.createServer(await createApp({ store, poller, cfg }));
@@ -61,7 +68,7 @@ test('full flow: players, manual log, sync, dedupe, merge, tombstones, import', 
   for (const tag in logs) for (const b of logs[tag]) for (const s of [...b.team, ...b.opponent]) { s.cards = []; s.supportCards = []; }
   const s1 = (await call('POST', '/api/sync')).body;
   assert.equal(s1.lastError, null);
-  assert.deepEqual(s1.lastResult, { checked: 3, found: 3, inserted: 2, linked: 1, enriched: 0 });
+  assert.deepEqual(s1.lastResult, { checked: 3, found: 3, inserted: 2, linked: 1, enriched: 0, profiles: 3 });
   // ...then again with decks: the existing match gets them filled in
   for (const tag in saved) logs[tag] = saved[tag];
   const s1b = (await call('POST', '/api/sync')).body;
@@ -84,6 +91,13 @@ test('full flow: players, manual log, sync, dedupe, merge, tombstones, import', 
   assert.equal(tb.mode, 'Triple Elixir Friendly');
 
   // Second sync imports nothing new
+  // Ladder trophies fetched once, then not again until they're older than profileMinutes
+  assert.deepEqual(league.players.find(p => p.id === lucas.id).ladder.trophies, 7123);
+  assert.equal(s1b.lastResult.profiles, 0);
+  // Changing a tag clears the old tag's trophies
+  const retag = (await call('PATCH', `/api/players/${ben.id}`, { tag: '#8L2LQLCQ' })).body;
+  assert.equal(retag.ladder, null);
+  await call('PATCH', `/api/players/${ben.id}`, { tag: TAGS.ben });
   const s2 = (await call('POST', '/api/sync')).body;
   assert.equal(s2.lastResult.inserted, 0); assert.equal(s2.lastResult.linked, 0); assert.equal(s2.lastResult.enriched, 0);
 
