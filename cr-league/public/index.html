@@ -119,9 +119,11 @@ td.r,th.r{text-align:right}
 .up{color:var(--win)} .down{color:var(--loss)} .flat{color:var(--muted)}
 .chip{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-stretch:85%;letter-spacing:.02em}
 .t-place{color:var(--muted);border-style:dashed}
+.t-wood{color:#b89a7a;border-color:#4e3d2e}
 .t-bronze{color:#e0a27a;border-color:#6b4630}
 .t-silver{color:#d3dbef;border-color:#58627d}
 .t-gold{color:var(--gold);border-color:#7a5d12}
+.t-plat{color:#9ff0d9;border-color:#1f6e5a}
 .t-diamond{color:#79e3ff;border-color:#1f5a6e}
 .t-champ{color:#ffb3f1;border-color:#6d2c66;background:rgba(255,120,230,.08)}
 .streak.W{color:var(--win);border-color:#1d5a3f}
@@ -915,6 +917,30 @@ table.h2h .pl .nm{max-width:128px}
 .howto .hi{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;color:#fff;background:var(--blue,#4a90ff);margin-top:1px}
 @media (max-width:560px){
   .about-pages div{grid-template-columns:1fr;gap:2px}
+}
+
+/* ---------- ranks, RP and the unplaced list ---------- */
+.rd .chip{font-size:10.5px;padding:1px 7px;margin-top:3px}
+.unplaced{border-top:1px solid var(--line);padding:12px 18px 16px}
+.unplaced-h{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;font-weight:700;font-size:13px;margin-bottom:6px}
+.unplaced-h .muted{font-weight:500}
+.unplaced-row{display:grid;grid-template-columns:auto 1fr 120px 42px;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);color:inherit;text-decoration:none}
+.unplaced-row:first-of-type{border-top:0}
+.un-name{min-width:0;display:grid}
+.un-name .nm{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.un-prog{height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.un-prog i{display:block;height:100%;background:linear-gradient(90deg,#2c6be0,var(--blue));border-radius:3px}
+.un-pct{font-size:12px;color:var(--muted);text-align:right}
+.srange{font-size:13px;margin-top:6px}
+.srange b{color:var(--ink);font-weight:600}
+.md-skill{font-size:11.5px;margin-top:2px}
+.md-rating span{white-space:nowrap}
+.rank-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.rank-list li{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center;font-size:13.5px}
+@media (max-width:560px){
+  .unplaced{padding:10px 12px 14px}
+  .unplaced-row{grid-template-columns:auto 1fr 70px 38px}
+  .rank-list li{grid-template-columns:1fr;gap:3px;justify-items:start}
 }
 </style>
 </head>

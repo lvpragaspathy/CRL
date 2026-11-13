@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, tier, cardStats,
+  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, isPlaced, rankOf, RANKS, cardStats,
   START_R, SEASON_CARRY, SEASON_RD_FLOOR, MIN_CHAMP_GAMES,
 } from '../public/rating.js';
 
@@ -42,17 +42,24 @@ let n = 0;
 const M = (a, b, ca, cb, t, extra = {}) => ({ id: 'm' + (++n), a, b, ca, cb, winner: ca > cb ? 'a' : cb > ca ? 'b' : 'draw', playedAt: t, createdAt: n, ranked: true, ...extra });
 
 test('soft reset at the month boundary, champion crowned for finished seasons', () => {
-  const P = { x: { id: 'x', name: 'X' }, y: { id: 'y', name: 'Y' } };
+  const P = { x: { id: 'x', name: 'X' }, y: { id: 'y', name: 'Y' }, z: { id: 'z', name: 'Z' } };
   const matches = {};
   const oct = Date.UTC(2026, 9, 10, 18);
-  for (let i = 0; i < MIN_CHAMP_GAMES; i++) { const m = M('x', 'y', 3, 0, oct + i * 36e5); matches[m.id] = m; }
+  // A three-way October with mixed results, enough for everyone to get placed (a champion has to have RP). x wins most.
+  const OCT_GAMES = 20, pairs = [['x', 'y'], ['y', 'z'], ['x', 'z']];
+  for (let i = 0; i < OCT_GAMES * 3 / 2; i++) {
+    const [a, b] = pairs[i % 3];
+    const xWins = a === 'x' || b === 'x' ? (a === 'x' ? i % 5 !== 0 : i % 5 === 0) : i % 2 === 0;
+    const m = M(a, b, xWins ? 2 : 1, xWins ? 1 : 2, oct + i * 36e5); matches[m.id] = m;
+  }
   const nov = Date.UTC(2026, 10, 5, 18);
   const m2 = M('y', 'x', 1, 0, nov); matches[m2.id] = m2;
   const L = computeLeague({ players: P, matches }, { tz: 'America/Chicago', now: Date.UTC(2026, 10, 12, 18) });
 
   assert.deepEqual(L.seasons, ['2026-11', '2026-10']);
   const octX = L.byKey['2026-10'].st.x, novX = L.byKey['2026-11'].st.x;
-  assert.equal(octX.w, MIN_CHAMP_GAMES);
+  assert.equal(octX.games, OCT_GAMES);
+  assert.ok(isPlaced(octX), 'x is placed by the end of October');
   assert.equal(novX.games, 1, 'season stats only count that month');
   // Season starts from the carried-over rating
   near(novX.hist[0], START_R + (octX.r - START_R) * SEASON_CARRY, 1e-9, 'carry');
@@ -60,9 +67,10 @@ test('soft reset at the month boundary, champion crowned for finished seasons', 
   assert.deepEqual(L.champions.map(c => [c.key, c.id]), [['2026-10', 'x']]);
   assert.equal(L.champCount.x, 1);
   // All-time view has no reset and counts everything
-  assert.equal(L.all.st.x.games, MIN_CHAMP_GAMES + 1);
+  assert.equal(L.all.st.x.games, OCT_GAMES + 1);
   // New season puts everyone back in placements
-  assert.ok(L.byKey['2026-11'].st.y.rd >= SEASON_RD_FLOOR || tier(L.byKey['2026-11'].st.y).name === 'Placement');
+  assert.ok(!isPlaced(L.byKey['2026-11'].st.x) && !isPlaced(L.byKey['2026-11'].st.y), 'new season: everyone replays placements');
+  assert.equal(L.byKey['2026-11'].delta[m2.id].rpA, null, 'no RP delta while unplaced');
   assert.ok(L.byKey['2026-10'].delta[m2.id] === undefined && L.byKey['2026-11'].delta[m2.id].pA < 0.5, 'underdog odds recorded');
 });
 
@@ -123,8 +131,10 @@ test('conservative score: a hot start with high RD ranks below a proven player',
   assert.ok(v.st.rook.r > v.st.vet.r, 'rook has the higher raw rating');
   assert.ok(v.st.rook.rd > v.st.vet.rd, 'but is less certain');
   near(v.st.rook.score, scoreOf(v.st.rook.r, v.st.rook.rd), 1e-9, 'score = r - 2RD');
-  assert.deepEqual(ranking({ players: P }, v).map(p => p.id).slice(0, 2), ['vet', 'rook'], 'proven player ranks first');
-  assert.ok(v.st.rook.lastScore != null && v.st.rook.scoreHist.length === 2);
+  assert.equal(ranking({ players: P }, v)[0].id, 'vet', 'proven player ranks first');
+  assert.ok(!isPlaced(v.st.rook) && ranking({ players: P }, v).at(-1).id === 'rook', 'one-game rook is unplaced and sorts last');
+  assert.equal(v.st.rook.lastScore, null, 'no RP delta shown for a placement game');
+  assert.equal(v.st.rook.scoreHist.length, 2);
 });
 
 test('pre-game ratings are the real "before" values for back-to-back games', () => {
@@ -136,6 +146,32 @@ test('pre-game ratings are the real "before" values for back-to-back games', () 
   const d1 = v.delta[m1.id], d2 = v.delta[m2.id];
   assert.equal(d1.preA, START_R, 'first game starts from 1500');
   near(d2.preA, d1.preA + d1.a, 1e-9, "second game's before = first game's after");
-  near(v.st.x.lastScore, v.st.x.scoreHist[2] - v.st.x.scoreHist[1], 1e-9, 'score change is not zero');
-  assert.ok(Math.abs(v.st.x.lastScore) > 0.5);
+  assert.ok(Math.abs(v.st.x.scoreHist[2] - v.st.x.scoreHist[1]) > 0.5, 'RP moved');
+  assert.equal(v.st.x.lastScore, null, 'but no delta is shown while unplaced');
+});
+
+test('ranks: divisions are 25 RP wide, Wood is the floor, Champion has no divisions', () => {
+  assert.equal(rankOf(1500).label, 'Champion');
+  assert.equal(rankOf(1499).label, 'Diamond I');
+  assert.equal(rankOf(1425).label, 'Diamond III');
+  assert.equal(rankOf(1424).label, 'Platinum I');
+  assert.equal(rankOf(1350).label, 'Platinum III');
+  assert.equal(rankOf(1300).label, 'Gold II');
+  assert.equal(rankOf(1200).label, 'Silver III');
+  assert.equal(rankOf(1125).label, 'Bronze III');
+  assert.equal(rankOf(1124).label, 'Wood I');
+  assert.equal(rankOf(1050).label, 'Wood III');
+  assert.equal(rankOf(900).label, 'Wood III', 'nothing below Wood III');
+  assert.ok(rankOf(1500).ord > rankOf(1499).ord && rankOf(1125).ord > rankOf(1124).ord, 'ord climbs with RP');
+  assert.equal(rankOf(1300).next, 1325, 'next division starts at the next 25');
+  assert.equal(RANKS.length, 7);
+});
+
+test('champion needs to be placed, not just to have 5 games', () => {
+  const P = { x: { id: 'x', name: 'X' }, y: { id: 'y', name: 'Y' } };
+  const matches = {}; const oct = Date.UTC(2026, 9, 10, 18);
+  for (let i = 0; i < MIN_CHAMP_GAMES; i++) { const m = M('x', 'y', 3, 0, oct + i * 36e5); matches[m.id] = m; }
+  const L = computeLeague({ players: P, matches }, { tz: 'America/Chicago', now: Date.UTC(2026, 10, 12, 18) });
+  assert.ok(!isPlaced(L.byKey['2026-10'].st.x), 'five games against one uncertain opponent is not enough to place');
+  assert.deepEqual(L.champions, []);
 });

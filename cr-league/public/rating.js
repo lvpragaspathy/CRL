@@ -13,7 +13,7 @@ export const START_RD = 350;
 export const START_SIGMA = 0.06;
 export const TAU = 0.5;               // system constant: how fast volatility can change
 export const SCALE = 173.7178;        // Glicko <-> Glicko-2 scale factor
-export const PROVISIONAL_RD = 110;    // above this a player is still in placements
+export const PROVISIONAL_RD = 130;    // above this a player is unplaced: about 8 games the first time, 3 after a season reset
 export const SEASON_CARRY = 0.5;      // new season: ratings move halfway back to 1500...
 export const SEASON_RD_FLOOR = 150;   // ...and RD goes up to at least this (a few placement games)
 export const MIN_CHAMP_GAMES = 5;     // games in a season to be eligible for champion
@@ -145,7 +145,7 @@ export const byTime = (x, y) => x.playedAt - y.playedAt || (x.createdAt || 0) - 
 
 function blankStats(id, r, rd) {
   const sc = scoreOf(r, rd);
-  return { id, r, rd, score: sc, lastScore: null, scoreHist: [sc], games: 0, ranked: 0, w: 0, l: 0, d: 0, cf: 0, ca: 0, three: 0, peak: r, hist: [r], rdHist: [rd],
+  return { id, r, rd, score: sc, lastScore: null, peakScore: sc, scoreHist: [sc], games: 0, ranked: 0, w: 0, l: 0, d: 0, cf: 0, ca: 0, three: 0, peak: r, hist: [r], rdHist: [rd],
     streakT: '', streakN: 0, best: 0, form: [], last: null, h2h: {} };
 }
 function tally(s, cf, ca, r, opp, d) {
@@ -201,15 +201,19 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
         for (const [id, S, P, pre] of [[m.a, st[m.a], A, a0], [m.b, st[m.b], B, b0]]) {
           S.r = P.r; S.rd = P.rd; S.ranked++; S.peak = Math.max(S.peak, P.r);
           S.hist.push(P.r); S.rdHist.push(P.rd);
-          S.score = scoreOf(P.r, P.rd); S.scoreHist.push(S.score);
-          S.lastScore = S.score - scoreOf(pre.r, pre.rd);
+          S.score = scoreOf(P.r, P.rd); S.scoreHist.push(S.score); S.peakScore = Math.max(S.peakScore, S.score);
+          S.lastScore = pre.rd <= PROVISIONAL_RD && P.rd <= PROVISIONAL_RD ? S.score - scoreOf(pre.r, pre.rd) : null;
           timeline[id].push({ t: m.playedAt, r: P.r, rd: P.rd, season: key });
         }
         st[m.a].last = dA; st[m.b].last = dB;
       }
-      tally(st[m.a], m.ca, m.cb, m.winner === 'a' ? 'W' : m.winner === 'b' ? 'L' : 'D', m.b, dA);
-      tally(st[m.b], m.cb, m.ca, m.winner === 'b' ? 'W' : m.winner === 'a' ? 'L' : 'D', m.a, dB);
-      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, preRdA: a0.rd, preRdB: b0.rd, pA, mult };
+      // RP before/after for each side, and the RP change once a player is placed (placement games swing by design, so they get null).
+      const rp = dA == null ? null : { a0: scoreOf(a0.r, a0.rd), a1: scoreOf(A.r, A.rd), b0: scoreOf(b0.r, b0.rd), b1: scoreOf(B.r, B.rd), placedA: A.rd <= PROVISIONAL_RD, placedB: B.rd <= PROVISIONAL_RD };
+      // A delta only means something when the player was placed before and after; the game that places you is still a placement game.
+      const rpA = rp && rp.placedA && a0.rd <= PROVISIONAL_RD ? rp.a1 - rp.a0 : null, rpB = rp && rp.placedB && b0.rd <= PROVISIONAL_RD ? rp.b1 - rp.b0 : null;
+      view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, preRdA: a0.rd, preRdB: b0.rd, pA, mult, rp, rpA, rpB };
+      tally(st[m.a], m.ca, m.cb, m.winner === 'a' ? 'W' : m.winner === 'b' ? 'L' : 'D', m.b, rpA);
+      tally(st[m.b], m.cb, m.ca, m.winner === 'b' ? 'W' : m.winner === 'a' ? 'L' : 'D', m.a, rpB);
       view.ms.push(m);
     }
     views[key] = view;
@@ -267,7 +271,7 @@ export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), 
   for (const key of keys) {
     if (key >= nowKey) continue;
     const v = season.views[key];
-    const best = Object.values(v.st).filter(s => s.games >= MIN_CHAMP_GAMES).sort((a, b) => b.score - a.score)[0];
+    const best = Object.values(v.st).filter(s => s.games >= MIN_CHAMP_GAMES && isPlaced(s)).sort((a, b) => b.score - a.score)[0];
     if (best) { champions.push({ key, id: best.id, r: best.r, score: best.score, games: best.games }); champCount[best.id] = (champCount[best.id] || 0) + 1; }
   }
   const end = seasonStart(nextSeasonKey(nowKey), tz);
@@ -285,21 +289,39 @@ export function computeLeague(data, { tz = 'America/Chicago', now = Date.now(), 
 }
 
 /* ---------- presentation helpers ---------- */
-/** Tiers go by score (rating − 2·RD); anyone the system is still unsure about is in placements. */
-export function tier(s) {
-  if (!s.games) return { name: 'Unranked', cls: 't-place' };
-  if (s.rd > PROVISIONAL_RD) return { name: 'Placement', cls: 't-place' };
-  const v = s.score ?? scoreOf(s.r, s.rd);
-  if (v >= 1600) return { name: 'Champion', cls: 't-champ' };
-  if (v >= 1500) return { name: 'Diamond', cls: 't-diamond' };
-  if (v >= 1400) return { name: 'Gold', cls: 't-gold' };
-  if (v >= 1300) return { name: 'Silver', cls: 't-silver' };
-  return { name: 'Bronze', cls: 't-bronze' };
+/* ---------- ranks ---------- */
+/** Ranked Points (RP) = rating − 2·RD: the rating the system is about 95% sure a player is above. */
+export const RANKS = [
+  { name: 'Wood', cls: 't-wood', min: 1050 },
+  { name: 'Bronze', cls: 't-bronze', min: 1125 },
+  { name: 'Silver', cls: 't-silver', min: 1200 },
+  { name: 'Gold', cls: 't-gold', min: 1275 },
+  { name: 'Platinum', cls: 't-plat', min: 1350 },
+  { name: 'Diamond', cls: 't-diamond', min: 1425 },
+  { name: 'Champion', cls: 't-champ', min: 1500 },
+];
+export const DIVISION_RP = 25;          // each rank below Champion has three divisions: III, II, I
+const ROMAN = ['', 'I', 'II', 'III'];
+/** A player is placed once the system is reasonably sure of their rating. Until then RP is hidden. */
+export const isPlaced = s => s.games > 0 && s.rd <= PROVISIONAL_RD;
+export const UNPLACED = Object.freeze({ name: 'Unplaced', div: 0, label: 'Unplaced', cls: 't-place', placed: false, ord: -1, next: null });
+/** Rank for an RP value: { name, div (3 lowest .. 1 highest, 0 for Champion), label, cls, ord (sortable), next (RP to the next division) } */
+export function rankOf(rp) {
+  let i = 0; while (i + 1 < RANKS.length && rp >= RANKS[i + 1].min) i++;
+  const R = RANKS[i];
+  if (i === RANKS.length - 1) return { name: R.name, div: 0, label: R.name, cls: R.cls, placed: true, ord: i * 3, next: null };
+  const div = Math.min(3, 3 - Math.floor((rp - R.min) / DIVISION_RP));  // below Wood's floor is still Wood III
+  const next = R.min + (3 - div + 1) * DIVISION_RP;
+  return { name: R.name, div, label: `${R.name} ${ROMAN[div]}`, cls: R.cls, placed: true, ord: i * 3 + (3 - div), next };
 }
+/** Rank for a player's season stats; unplaced players get the UNPLACED marker. */
+export const rank = s => (isPlaced(s) ? rankOf(s.score ?? scoreOf(s.r, s.rd)) : UNPLACED);
+/** @deprecated old name, kept for callers that only need the label */
+export const tier = s => (s.games ? rank(s) : { ...UNPLACED, name: 'Unranked', label: 'Unranked' });
 export function ranking(data, view) {
   return Object.values(data.players).filter(p => !p.archived && view.st[p.id]).sort((x, y) => {
     const a = view.st[x.id], b = view.st[y.id];
-    return (b.games > 0) - (a.games > 0) || b.score - a.score || b.r - a.r || b.games - a.games || x.name.localeCompare(y.name);
+    return isPlaced(b) - isPlaced(a) || (isPlaced(a) ? b.score - a.score || b.r - a.r : b.games - a.games) || x.name.localeCompare(y.name);
   });
 }
 export const pct = s => (s.games ? Math.round((100 * (s.w + 0.5 * s.d)) / s.games) + '%' : '—');
