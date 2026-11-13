@@ -1,12 +1,15 @@
-# CR Friends League
+# CR Friends League: setup and deployment
 
-A Clash Royale friendly-battle league for you and your friends: Glicko-2 ratings, monthly seasons with champions, win probabilities, decks and card stats, and **automatic match tracking** from the official Clash Royale API.
+A ranked Clash Royale friendly-battle league with **automatic match tracking** from the official Clash Royale API: Glicko-2 skill behind the scenes, Ranked Points and ranks (Wood to Champion) up front, placements, monthly seasons with champions, and deck, rivalry and stats pages.
+
+This file covers running and deploying it. For what the app does and how the ranking works, see the [main README](../README.md).
 
 Every few minutes the server pulls each tagged player's battle log, keeps the 1v1 friendlies between two league members, and adds them to the league. You can still log, edit or delete matches by hand.
 
 ```
 public/          the UI (plain HTML + ES modules, no build step)
-  rating.js      Glicko-2 + seasons + card stats + backtesting (shared by the UI and the tests)
+  app.js         views, routing, charts, dialogs, tab bar
+  rating.js      Glicko-2, seasons, RP, ranks, placements, card stats, backtesting (shared by the UI and the tests)
   stats.js       Stats/Lab analytics: clutch, elixir leaked, tilt, meta, records, recap, calibration, tuning
 src/
   server.js      HTTP server + REST API + static files
@@ -73,7 +76,7 @@ Already have data in the Claude-hosted version? Click **Copy data as JSON** ther
 npm install
 cp .env.example .env   # fill in CR_API_TOKEN and LEAGUE_PASSWORD
 npm run dev            # http://localhost:3000, in-memory store unless DATABASE_URL is set
-npm test               # 15 tests, including a full sync against a fake CR API
+npm test               # 36 tests, including a full sync against a fake CR API
 ```
 
 Local dev through the proxy works from any network, since the key is whitelisted for the proxy's IP rather than yours.

@@ -119,3 +119,27 @@ test('prediction scoring, calibration buckets, Elo baseline, tuning split', () =
   assert.ok(t.best.train <= t.current.train + 1e-12);
   assert.equal(eloPreds(data, { tz: 'UTC', now: T0 }).length, 40);
 });
+
+test('mode families: mirror and draft-style battles stay out of deck stats, per-mode records add up', async () => {
+  const { modeFamily, ownDeck, modeRecords, computeLeague } = await import('../public/rating.js');
+  assert.equal(modeFamily('Classic Decks Friendly'), 'Classic');
+  assert.equal(modeFamily('Triple Elixir'), 'Classic');
+  assert.equal(modeFamily(undefined), 'Classic', 'manual entries with no mode count as own deck');
+  assert.equal(modeFamily('Mirror Deck Friendly'), 'Mirror');
+  for (const m of ['Chaos 1v1 Draft', 'Pick Mode', 'Draft Competitive', 'Draft']) assert.equal(modeFamily(m), 'Draft', m);
+  const P = { x: { id: 'x', name: 'X' }, y: { id: 'y', name: 'Y' } };
+  const deck = { cards: [{ id: 1, name: 'Hog Rider' }, { id: 2, name: 'Log' }] };
+  const t = Date.UTC(2026, 10, 5, 18);
+  const mk = (i, mode, winner) => ({ id: 'm' + i, a: 'x', b: 'y', ca: winner === 'a' ? 1 : 0, cb: winner === 'b' ? 1 : 0, winner, playedAt: t + i * 36e5, ranked: true, mode, deckA: deck, deckB: deck });
+  const ms = [mk(1, 'Classic Decks Friendly', 'a'), mk(2, 'Mirror Deck Friendly', 'b'), mk(3, 'Pick Mode', 'a'), mk(4, 'Chaos 1v1 Draft', 'a')];
+  const data = { players: P, matches: Object.fromEntries(ms.map(m => [m.id, m])) };
+  const L = computeLeague(data, { tz: 'UTC', now: t + 10 * 36e5 });
+  const view = L.byKey['2026-11'];
+  assert.deepEqual(view.ms.filter(ownDeck).map(m => m.id), ['m1']);
+  const mt = meta(data, view);
+  assert.equal(mt.decks, 2, 'one own-deck battle, two decks');
+  assert.equal(mt.skipped, 3);
+  const rec = modeRecords('x', view);
+  assert.deepEqual(rec.map(r => [r.family, r.w, r.l]), [['Classic', 1, 0], ['Mirror', 0, 1], ['Draft', 2, 0]]);
+  assert.deepEqual(rec.find(r => r.family === 'Draft').modes.map(([n]) => n).sort(), ['Chaos 1v1 Draft', 'Pick Mode']);
+});
