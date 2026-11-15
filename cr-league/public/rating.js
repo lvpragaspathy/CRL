@@ -13,7 +13,10 @@ export const START_RD = 350;
 export const START_SIGMA = 0.06;
 export const TAU = 0.5;               // system constant: how fast volatility can change
 export const SCALE = 173.7178;        // Glicko <-> Glicko-2 scale factor
-export const PROVISIONAL_RD = 130;    // above this a player is unplaced: about 8 games the first time, 3 after a season reset
+export const PROVISIONAL_RD = 130;    // a player is placed once their RD is this low (about 7 games the first time, 2 after a season reset)…
+export const PLACEMENT_GAMES = 10;     // …or after this many rated battles in the season, whichever comes first
+/** Placed after this many rated games at this RD? One-sided streaks barely shrink RD, so the game cap guarantees an end to placements. */
+export const placedAt = (rd, rated) => rated > 0 && (rd <= PROVISIONAL_RD || rated >= PLACEMENT_GAMES);
 export const SEASON_CARRY = 0.5;      // new season: ratings move halfway back to 1500...
 export const SEASON_RD_FLOOR = 150;   // ...and RD goes up to at least this (a few placement games)
 export const MIN_CHAMP_GAMES = 5;     // games in a season to be eligible for champion
@@ -189,6 +192,7 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
       const b0 = { ...inflate(B, B.lastAt == null ? 0 : Math.floor((m.playedAt - B.lastAt) / DAY)) };
       const pA = winProb(a0, b0);
       let dA = null, dB = null, mult = null;
+      const placed = {};   // placed before (a0/b0) and after (a1/b1) this battle
       if (m.ranked) {
         const sa = m.winner === 'a' ? 1 : m.winner === 'b' ? 0 : 0.5;
         mult = m.winner === 'draw' ? 1
@@ -198,19 +202,21 @@ function simulate(players, ms, { keys, keyOf, resets, now, params = DEFAULT_PARA
         dA = a1.r - a0.r; dB = b1.r - b0.r;
         Object.assign(A, a1, { lastAt: m.playedAt, played: true });
         Object.assign(B, b1, { lastAt: m.playedAt, played: true });
-        for (const [id, S, P, pre] of [[m.a, st[m.a], A, a0], [m.b, st[m.b], B, b0]]) {
+        for (const [id, S, P, pre, side] of [[m.a, st[m.a], A, a0, 'a'], [m.b, st[m.b], B, b0, 'b']]) {
+          const n0 = S.ranked;
+          placed[side + '0'] = placedAt(pre.rd, n0); placed[side + '1'] = placedAt(P.rd, n0 + 1);
           S.r = P.r; S.rd = P.rd; S.ranked++; S.peak = Math.max(S.peak, P.r);
           S.hist.push(P.r); S.rdHist.push(P.rd);
           S.score = scoreOf(P.r, P.rd); S.scoreHist.push(S.score); S.peakScore = Math.max(S.peakScore, S.score);
-          S.lastScore = pre.rd <= PROVISIONAL_RD && P.rd <= PROVISIONAL_RD ? S.score - scoreOf(pre.r, pre.rd) : null;
-          timeline[id].push({ t: m.playedAt, r: P.r, rd: P.rd, season: key });
+          S.lastScore = placed[side + '0'] && placed[side + '1'] ? S.score - scoreOf(pre.r, pre.rd) : null;
+          timeline[id].push({ t: m.playedAt, r: P.r, rd: P.rd, season: key, placed: placed[side + '1'] });
         }
         st[m.a].last = dA; st[m.b].last = dB;
       }
       // RP before/after for each side, and the RP change once a player is placed (placement games swing by design, so they get null).
-      const rp = dA == null ? null : { a0: scoreOf(a0.r, a0.rd), a1: scoreOf(A.r, A.rd), b0: scoreOf(b0.r, b0.rd), b1: scoreOf(B.r, B.rd), placedA: A.rd <= PROVISIONAL_RD, placedB: B.rd <= PROVISIONAL_RD };
+      const rp = dA == null ? null : { a0: scoreOf(a0.r, a0.rd), a1: scoreOf(A.r, A.rd), b0: scoreOf(b0.r, b0.rd), b1: scoreOf(B.r, B.rd), placedA: placed.a1, placedB: placed.b1, placedA0: placed.a0, placedB0: placed.b0 };
       // A delta only means something when the player was placed before and after; the game that places you is still a placement game.
-      const rpA = rp && rp.placedA && a0.rd <= PROVISIONAL_RD ? rp.a1 - rp.a0 : null, rpB = rp && rp.placedB && b0.rd <= PROVISIONAL_RD ? rp.b1 - rp.b0 : null;
+      const rpA = rp && rp.placedA && rp.placedA0 ? rp.a1 - rp.a0 : null, rpB = rp && rp.placedB && rp.placedB0 ? rp.b1 - rp.b0 : null;
       view.delta[m.id] = { a: dA, b: dB, preA: a0.r, preB: b0.r, preRdA: a0.rd, preRdB: b0.rd, pA, mult, rp, rpA, rpB };
       tally(st[m.a], m.ca, m.cb, m.winner === 'a' ? 'W' : m.winner === 'b' ? 'L' : 'D', m.b, rpA);
       tally(st[m.b], m.cb, m.ca, m.winner === 'b' ? 'W' : m.winner === 'a' ? 'L' : 'D', m.a, rpB);
@@ -298,7 +304,7 @@ const NAMES = [['Wood', 't-wood'], ['Bronze', 't-bronze'], ['Silver', 't-silver'
 export const RANKS = NAMES.map(([name, cls], i) => ({ name, cls, min: CHAMPION_RP - (NAMES.length - 1 - i) * RANK_SPAN }));
 const ROMAN = ['', 'I', 'II', 'III'];
 /** A player is placed once the system is reasonably sure of their rating. Until then RP is hidden. */
-export const isPlaced = s => s.games > 0 && s.rd <= PROVISIONAL_RD;
+export const isPlaced = s => s.games > 0 && placedAt(s.rd, s.ranked ?? s.games);
 /**
  * Battles left before a player is placed. Replays their uncertainty forward against a typical settled opponent
  * (same skill, RD 80) with alternating results, since RD shrinks at about the same pace whether you win or lose.
@@ -307,7 +313,7 @@ export function battlesToPlace(s, oppRd = 80) {
   if (isPlaced(s)) return 0;
   let p = { r: s.r, rd: s.rd, sigma: START_SIGMA }, n = 0;
   while (p.rd > PROVISIONAL_RD && n < 40) { p = glicko2Update(p, [{ r: p.r, rd: oppRd, s: n % 2 }], TAU, 1); n++; }
-  return n;
+  return Math.min(n, PLACEMENT_GAMES - (s.ranked ?? s.games));   // the game cap places them regardless
 }
 /** The RP an unplaced player would show if they placed at their current skill estimate. */
 export const projectedRp = s => s.r - 2 * PROVISIONAL_RD;
