@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, isPlaced, rankOf, RANKS, battlesToPlace, projectedRp, PROVISIONAL_RD, cardStats,
+  glicko2Update, winProb, inflate, marginMult, computeLeague, seasonKey, seasonStart, nextSeasonKey, isPlaced, rankOf, RANKS, battlesToPlace, projectedRp, PROVISIONAL_RD, PLACEMENT_GAMES, cardStats,
   START_R, SEASON_CARRY, SEASON_RD_FLOOR, MIN_CHAMP_GAMES,
 } from '../public/rating.js';
 
@@ -195,4 +195,22 @@ test('placement countdown: about 8 battles from scratch, about 3 after a season 
   assert.ok(Math.abs(battlesToPlace({ games: 0, r: 1600, rd: 150 }) - 3) <= 1, 'season reset');
   assert.equal(battlesToPlace({ games: 20, r: 1500, rd: 90 }), 0);
   assert.equal(projectedRp({ r: 1800 }), 1800 - 2 * PROVISIONAL_RD);
+});
+
+test('placement cap: a one-sided streak still places after 10 rated battles', () => {
+  const P = { x: { id: 'x', name: 'X' }, y: { id: 'y', name: 'Y' }, z: { id: 'z', name: 'Z' } };
+  const t = Date.UTC(2026, 10, 2, 18), matches = {};
+  // y and z build a settled history, then x beats them every single time.
+  for (let i = 0; i < 30; i++) { const m = M(i % 2 ? 'y' : 'z', i % 2 ? 'z' : 'y', i % 3 ? 2 : 1, i % 3 ? 1 : 2, t + i * 36e5); matches[m.id] = m; }
+  const xs = [];
+  for (let i = 0; i < PLACEMENT_GAMES; i++) { const m = M('x', i % 2 ? 'y' : 'z', 3, 0, t + (40 + i) * 36e5); matches[m.id] = m; xs.push(m.id); }
+  const L = computeLeague({ players: P, matches }, { tz: 'UTC', now: t + 60 * 36e5 });
+  const v = L.byKey['2026-11'], x = v.st.x;
+  assert.ok(x.rd > PROVISIONAL_RD, 'a perfect streak leaves RD high');
+  assert.ok(isPlaced(x), 'but the game cap places them');
+  assert.equal(battlesToPlace({ games: PLACEMENT_GAMES - 3, ranked: PLACEMENT_GAMES - 3, r: 1900, rd: 200 }), 3, 'countdown never promises more than the cap allows');
+  const last = v.delta[xs.at(-1)], prev = v.delta[xs.at(-2)];
+  assert.equal(last.rp.placedA0, false); assert.equal(last.rp.placedA, true, 'the 10th battle is the placing one');
+  assert.equal(last.rpA, null, 'and still counts as a placement game');
+  assert.equal(prev.rp.placedA, false);
 });
